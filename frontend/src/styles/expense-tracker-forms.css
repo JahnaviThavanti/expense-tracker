@@ -1,0 +1,117 @@
+/* PAGE WRAPPER */
+.add-expense-page{
+  max-width:900px;
+  margin:auto;
+  padding:30px 20px;
+}
+
+/* HEADER */
+.expense-header h1{
+  font-size:32px;
+  margin-bottom:5px;
+}
+
+.expense-header p{
+  color:#94a3b8;
+  margin-bottom:30px;
+}
+
+/* CARD */
+.expense-card{
+  background:#020617;
+  padding:35px;
+  border-radius:18px;
+  box-shadow:0 15px 40px rgba(0,0,0,0.45);
+  display:flex;
+  flex-direction:column;
+  gap:20px;
+}
+
+/* AMOUNT */
+.amount-section label{
+  color:#94a3b8;
+  font-size:14px;
+}
+
+.amount-input{
+  display:flex;
+  align-items:center;
+  background:#0f172a;
+  border-radius:14px;
+  padding:16px;
+  margin-top:6px;
+}
+
+.amount-input span{
+  font-size:28px;
+  margin-right:10px;
+}
+
+.amount-input input{
+  background:transparent;
+  border:none;
+  color:white;
+  font-size:28px;
+  width:100%;
+  outline:none;
+}
+
+/* GRID */
+.expense-grid{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:20px;
+}
+
+.expense-grid label{
+  color:#94a3b8;
+  font-size:14px;
+}
+
+.expense-grid input,
+.expense-grid select{
+  margin-top:6px;
+  padding:12px;
+  border-radius:12px;
+  border:1px solid #1e293b;
+  background:#020617;
+  color:white;
+  width:100%;
+}
+
+/* NOTE */
+.note-section textarea{
+  margin-top:6px;
+  width:100%;
+  min-height:120px;
+  border-radius:14px;
+  padding:14px;
+  background:#020617;
+  border:1px solid #1e293b;
+  color:white;
+  resize:none;
+}
+
+/* BUTTON */
+.expense-save-btn{
+  margin-top:10px;
+  padding:16px;
+  background:linear-gradient(90deg,#4f46e5,#7c3aed);
+  border:none;
+  border-radius:14px;
+  font-size:17px;
+  color:white;
+  cursor:pointer;
+  transition:.25s;
+}
+
+.expense-save-btn:hover{
+  transform:translateY(-2px);
+}
+
+/* MOBILE */
+@media(max-width:768px){
+  .expense-grid{
+    grid-template-columns:1fr;
+  }
+}

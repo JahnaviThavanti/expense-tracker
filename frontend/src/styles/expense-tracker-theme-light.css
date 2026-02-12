@@ -1,0 +1,31 @@
+
+
+body.light {
+  background: #f8fafc;
+  color: #0f172a;
+}
+
+body.light .dashboard-container {
+  background: #f8fafc;
+}
+
+body.light .main-section {
+  background: #f1f5f9;
+}
+
+body.light .profile-card,
+body.light .stat-box,
+body.light .settings-card,
+body.light .report-card,
+body.light .recent-expenses {
+  background: white;
+  color: #0f172a;
+  border: 1px solid #e5e7eb;
+}
+
+body.light input,
+body.light select {
+  background: white;
+  color: #0f172a;
+  border: 1px solid #e5e7eb;
+}

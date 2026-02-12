@@ -1,0 +1,31 @@
+/* DARK THEME */
+
+body.dark {
+  background: #020617;
+  color: white;
+}
+
+body.dark .dashboard-container {
+  background: #020617;
+}
+
+body.dark .main-section {
+  background: #020617;
+}
+
+body.dark .profile-card,
+body.dark .stat-box,
+body.dark .settings-card,
+body.dark .report-card,
+body.dark .recent-expenses {
+  background: #020617;
+  color: white;
+  border: 1px solid rgba(255,255,255,0.05);
+}
+
+body.dark input,
+body.dark select {
+  background: #01020a;
+  color: white;
+  border: 1px solid rgba(255,255,255,0.08);
+}
