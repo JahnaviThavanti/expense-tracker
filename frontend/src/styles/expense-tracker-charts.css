@@ -249,3 +249,10 @@
   grid-template-columns: 1fr;
 }
 
+@media (max-width: 768px) {
+  .recharts-legend-wrapper {
+    position: relative !important;
+    width: 100% !important;
+    margin-top: 20px;
+  }
+}

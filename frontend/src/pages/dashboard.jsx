@@ -17,12 +17,12 @@ export default function Dashboard() {
   const [insight, setInsight] = useState("");
   const [notification, setNotification] = useState("");
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [allExpenses, setAllExpenses] = useState([]);
 
   /* ================= LOAD DATA ================= */
 
   useEffect(() => {
-    fetchExpenses();
-    fetchStats();
+    fetchDashboardData();
 
     // AI insight disabled for Week-4
     // API.get("/expenses/analytics/unusual")
@@ -34,26 +34,37 @@ export default function Dashboard() {
       .catch(() => {});
   }, []);
 
-  const fetchStats = async () => {
+  const fetchDashboardData = async () => {
     try {
-      const res = await API.get("/user/stats");
-      setTotal(res.data.totalSpent);
-      setMonthly(res.data.monthlySpent);
-      setCount(res.data.transactions);
-    } catch (err) {
-      console.log("Dashboard stats error:", err);
-    }
-  };
-
-  const fetchExpenses = async () => {
-    try {
-      const res = await API.get("/expenses?page=1&limit=200");
+      // Fetch all expenses to calculate accurate stats
+      const res = await API.get("/expenses?limit=1000");
       const data = Array.isArray(res.data) ? res.data : [];
 
-      setExpenses(data);
+      // 1. Calculate Total Spent
+      const totalSpent = data.reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
+      setTotal(totalSpent);
+
+      // 2. Calculate Monthly Spent
+      const now = new Date();
+      const thisMonth = now.getMonth();
+      const thisYear = now.getFullYear();
+
+      const monthlySpent = data
+        .filter(item => {
+          const d = new Date(item.date || item.createdAt);
+          return d.getMonth() === thisMonth && d.getFullYear() === thisYear;
+        })
+        .reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
+      
+      setMonthly(monthlySpent);
+
+      // 3. Set Expenses for Activity List (Top 5 recent)
+      setAllExpenses(data);
+      setExpenses(data.slice(0, 5));
+      setCount(data.length);
 
     } catch (err) {
-      console.log("Dashboard error:", err);
+      console.log("Dashboard load error:", err);
     }
   };
 
@@ -98,10 +109,11 @@ export default function Dashboard() {
         {/* MAIN DASHBOARD CONTENT */}
         <div className="dashboard-sections">
 
-          {/* CHART (disabled for Week-4) */}
-          {/* <div className="dashboard-card">
-            <ChartSection expenses={expenses} />
-          </div> */}
+          
+          <div className="dashboard-card">
+            <h2>Overall Spending Analytics</h2>
+            <ChartSection expenses={allExpenses} />
+          </div>
 
           {/* RECENT ACTIVITIES */}
           <div className="dashboard-card">

@@ -54,6 +54,15 @@ export default function Expenses() {
 
       const res = await API.get(query);
 
+      const data = Array.isArray(res.data) ? res.data : [];
+
+      // 🔥 FIX — if no expenses for selected month
+      if (!data.length) {
+        setExpenses([]);
+        setTotalSpend(0);
+        return;
+      }
+
       const sorted = res.data.sort(
         (a, b) =>
           new Date(b.createdAt || b.date) -
@@ -67,6 +76,8 @@ export default function Expenses() {
 
     } catch (err) {
       console.log("Expense load error:", err);
+      setExpenses([]);
+      setTotalSpend(0);
     } finally {
       setLoading(false);
     }
