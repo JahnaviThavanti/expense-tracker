@@ -4,6 +4,9 @@ import Navbar from "../components/Navbar";
 import Sidebar from "../components/Sidebar";
 import "../styles/expense-tracker-expenses.css";
 
+import DatePicker from "react-datepicker";
+import "react-datepicker/dist/react-datepicker.css";
+
 export default function Expenses() {
 
   const [expenses, setExpenses] = useState([]);
@@ -15,7 +18,7 @@ export default function Expenses() {
 
   const [filterMonth, setFilterMonth] = useState("");
   const [filterYear, setFilterYear] = useState("");
-  const [filterDate, setFilterDate] = useState("");
+  const [filterDate, setFilterDate] = useState(null);
 
   useEffect(() => {
     fetchExpenses();
@@ -33,37 +36,34 @@ export default function Expenses() {
       // category
       if (categoryFilter) query += `&category=${categoryFilter}`;
 
-      // date filter (highest priority)
+      /* =========================
+         DATE FILTERING (FIXED)
+         ========================= */
+
       if (filterDate) {
-        query += `&date=${filterDate}`;
-      } else {
-
-        // if user selected month/year → use them
-        if (filterMonth && filterYear) {
-          query += `&month=${filterMonth}&year=${filterYear}`;
-        } 
-        else {
-          // DEFAULT → CURRENT MONTH
-          const now = new Date();
-          const currentMonth = now.getMonth() + 1;
-          const currentYear = now.getFullYear();
-
-          query += `&month=${currentMonth}&year=${currentYear}`;
-        }
+        // 🔥 send ISO to backend
+        const isoDate = filterDate.toISOString().split("T")[0];
+        query += `&date=${isoDate}`;
+      } 
+      else if (filterMonth && filterYear) {
+        query += `&month=${filterMonth}&year=${filterYear}`;
+      } 
+      else {
+        // default current month
+        const now = new Date();
+        query += `&month=${now.getMonth()+1}&year=${now.getFullYear()}`;
       }
 
       const res = await API.get(query);
-
       const data = Array.isArray(res.data) ? res.data : [];
 
-      // 🔥 FIX — if no expenses for selected month
       if (!data.length) {
         setExpenses([]);
         setTotalSpend(0);
         return;
       }
 
-      const sorted = res.data.sort(
+      const sorted = data.sort(
         (a, b) =>
           new Date(b.createdAt || b.date) -
           new Date(a.createdAt || a.date)
@@ -71,7 +71,11 @@ export default function Expenses() {
 
       setExpenses(sorted);
 
-      const total = sorted.reduce((sum, e) => sum + Number(e.amount || 0), 0);
+      const total = sorted.reduce(
+        (sum, e) => sum + Number(e.amount || 0),
+        0
+      );
+
       setTotalSpend(total);
 
     } catch (err) {
@@ -97,7 +101,7 @@ export default function Expenses() {
   const resetFilters = () => {
     setSearch("");
     setCategoryFilter("");
-    setFilterDate("");
+    setFilterDate(null);
     setFilterMonth("");
     setFilterYear("");
   };
@@ -128,8 +132,11 @@ export default function Expenses() {
           </div>
         </div>
 
-        {/* FILTER BAR */}
+        {/* =========================
+           FILTER BAR (UPGRADED)
+           ========================= */}
         <div className="expense-filters">
+
           <input
             placeholder="Search by title, note..."
             value={search}
@@ -149,14 +156,28 @@ export default function Expenses() {
             <option>Other</option>
           </select>
 
-          <select value={filterMonth} onChange={(e) => setFilterMonth(e.target.value)}>
+          {/* MONTH */}
+          <select
+            value={filterMonth}
+            onChange={(e) => {
+              setFilterMonth(e.target.value);
+              setFilterDate(null); // avoid conflict
+            }}
+          >
             <option value="">Month</option>
             {[...Array(12)].map((_, i) => (
               <option key={i} value={i + 1}>{i + 1}</option>
             ))}
           </select>
 
-          <select value={filterYear} onChange={(e) => setFilterYear(e.target.value)}>
+          {/* YEAR */}
+          <select
+            value={filterYear}
+            onChange={(e) => {
+              setFilterYear(e.target.value);
+              setFilterDate(null); // avoid conflict
+            }}
+          >
             <option value="">Year</option>
             <option>2023</option>
             <option>2024</option>
@@ -164,10 +185,30 @@ export default function Expenses() {
             <option>2026</option>
           </select>
 
-          <input
-            type="date"
-            value={filterDate}
-            onChange={(e) => setFilterDate(e.target.value)}
+          {/* MODERN CALENDAR */}
+          <DatePicker
+            selected={filterDate}
+            onChange={(date) => {
+              setFilterDate(date);
+              setFilterMonth("");
+              setFilterYear("");
+            }}
+            dateFormat="dd/MM/yyyy"
+            placeholderText="Select date"
+
+            showMonthDropdown
+            showYearDropdown
+            dropdownMode="select"
+            scrollableYearDropdown
+            yearDropdownItemNumber={100}
+
+            todayButton="Today"
+            maxDate={new Date()}
+            isClearable
+
+            className="expense-input"
+            calendarClassName="modern-calendar"
+            popperPlacement="bottom-start"
           />
 
           <button className="reset-btn" onClick={resetFilters}>
@@ -175,7 +216,9 @@ export default function Expenses() {
           </button>
         </div>
 
-        {/* LIST */}
+        {/* =========================
+           LIST
+           ========================= */}
         {loading ? (
           <p className="empty-text">Loading expenses...</p>
         ) : expenses.length === 0 ? (
@@ -193,7 +236,9 @@ export default function Expenses() {
                   <div className="expense-text">
                     <h3>{e.title || e.category}</h3>
                     <span className="expense-meta">
-                      {e.category} • {new Date(e.date || e.createdAt).toLocaleDateString()}
+                      {e.category} •{" "}
+                      {new Date(e.date || e.createdAt)
+                        .toLocaleDateString("en-GB")}
                     </span>
                   </div>
                 </div>

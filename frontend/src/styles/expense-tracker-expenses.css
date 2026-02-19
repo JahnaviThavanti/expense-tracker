@@ -233,3 +233,25 @@
   }
 
 }
+
+/* filter calendar */
+.modern-calendar {
+  background:#020617 !important;
+  border:1px solid #1e293b !important;
+  border-radius:14px !important;
+  color:white !important;
+  box-shadow:0 20px 60px rgba(0,0,0,.6);
+}
+
+.react-datepicker__header {
+  background:transparent !important;
+  border-bottom:1px solid rgba(255,255,255,.06) !important;
+}
+
+.react-datepicker__day--selected {
+  background:#7c5cff !important;
+}
+
+.react-datepicker__day:hover {
+  background:#7c5cff33 !important;
+}

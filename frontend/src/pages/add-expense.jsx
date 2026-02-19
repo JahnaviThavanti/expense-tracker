@@ -6,18 +6,21 @@ import Sidebar from "../components/Sidebar";
 import CategorySelector from "../components/CategorySelector";
 import "../styles/expense-tracker-forms.css";
 
+import DatePicker from "react-datepicker";
+import "react-datepicker/dist/react-datepicker.css";
+
 export default function AddExpense() {
 
   const navigate = useNavigate();
 
   const [amount, setAmount] = useState("");
   const [category, setCategory] = useState("Food");
-  const [date, setDate] = useState("");
+  const [date, setDate] = useState(new Date());
   const [note, setNote] = useState("");
   const [loading, setLoading] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  
 
-  /* SUBMIT EXPENSE */
   const handleSubmit = async (e) => {
     e.preventDefault();
 
@@ -57,16 +60,13 @@ export default function AddExpense() {
 
         <div className="add-expense-page">
 
-          {/* HEADER */}
           <div className="expense-header">
             <h1>Add Expense</h1>
             <p>Track your daily spending and stay in control 💰</p>
           </div>
 
-          {/* CARD */}
           <form className="expense-card" onSubmit={handleSubmit}>
 
-            {/* AMOUNT */}
             <div className="amount-section">
               <label>Amount</label>
               <div className="amount-input">
@@ -80,7 +80,6 @@ export default function AddExpense() {
               </div>
             </div>
 
-            {/* GRID */}
             <div className="expense-grid">
 
               <div>
@@ -90,16 +89,34 @@ export default function AddExpense() {
 
               <div>
                 <label>Date</label>
-                <input
-                  type="date"
-                  value={date}
-                  onChange={(e) => setDate(e.target.value)}
+
+                <DatePicker
+                  selected={date}
+                  onChange={(selectedDate) => setDate(selectedDate)}
+                  dateFormat="dd/MM/yyyy"
+                  placeholderText="Select date"
+
+                  /* MODERN FEATURES */
+                  showMonthDropdown
+                  showYearDropdown
+                  dropdownMode="select"
+                  scrollableYearDropdown
+                  yearDropdownItemNumber={100}
+                  showPopperArrow={false}
+
+                  /* UX */
+                  maxDate={new Date()}
+                  todayButton="Today"
+                  isClearable
+
+                  /* STYLE */
+                  className="date-picker-input expense-input"
+                  calendarClassName="modern-calendar"
                 />
               </div>
 
             </div>
 
-            {/* NOTE */}
             <div className="note-section">
               <label>Note</label>
               <textarea
@@ -109,7 +126,6 @@ export default function AddExpense() {
               />
             </div>
 
-            {/* BUTTON */}
             <button
               className="expense-save-btn"
               type="submit"
