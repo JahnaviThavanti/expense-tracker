@@ -3,6 +3,8 @@ import API from "../utils/api";
 import Navbar from "../components/Navbar";
 import Sidebar from "../components/Sidebar";
 import "../styles/expense-tracker-expenses.css";
+import "../styles/shared-datepicker.css";
+import useExpenseDateHighlights from "../hooks/useExpenseDateHighlights";
 
 import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
@@ -19,6 +21,15 @@ export default function Expenses() {
   const [filterMonth, setFilterMonth] = useState("");
   const [filterYear, setFilterYear] = useState("");
   const [filterDate, setFilterDate] = useState(null);
+  const { hasExpenseOnDate, refreshExpenseDateHighlights } =
+    useExpenseDateHighlights();
+
+  const toApiDate = (value) => {
+    const year = value.getFullYear();
+    const month = String(value.getMonth() + 1).padStart(2, "0");
+    const day = String(value.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  };
 
   useEffect(() => {
     fetchExpenses();
@@ -42,8 +53,8 @@ export default function Expenses() {
 
       if (filterDate) {
         // 🔥 send ISO to backend
-        const isoDate = filterDate.toISOString().split("T")[0];
-        query += `&date=${isoDate}`;
+        const apiDate = toApiDate(filterDate);
+        query += `&date=${apiDate}`;
       } 
       else if (filterMonth && filterYear) {
         query += `&month=${filterMonth}&year=${filterYear}`;
@@ -93,6 +104,7 @@ export default function Expenses() {
     try {
       await API.delete(`/expenses/${id}`);
       fetchExpenses();
+      refreshExpenseDateHighlights();
     } catch (err) {
       console.log("Delete failed:", err);
     }
@@ -195,20 +207,21 @@ export default function Expenses() {
             }}
             dateFormat="dd/MM/yyyy"
             placeholderText="Select date"
-
             showMonthDropdown
             showYearDropdown
             dropdownMode="select"
             scrollableYearDropdown
             yearDropdownItemNumber={100}
-
+            showPopperArrow={false}
             todayButton="Today"
             maxDate={new Date()}
             isClearable
-
-            className="expense-input"
+            className="date-picker-input"
             calendarClassName="modern-calendar"
             popperPlacement="bottom-start"
+            dayClassName={(day) =>
+              hasExpenseOnDate(day) ? "expense-day-highlight" : undefined
+            }
           />
 
           <button className="reset-btn" onClick={resetFilters}>

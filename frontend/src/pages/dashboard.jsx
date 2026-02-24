@@ -36,12 +36,30 @@ export default function Dashboard() {
 
   const fetchDashboardData = async () => {
     try {
-      // Fetch all expenses to calculate accurate stats
-      const res = await API.get("/expenses?limit=1000");
-      const data = Array.isArray(res.data) ? res.data : [];
+      // Fetch all expenses across all dates and pages.
+      const limit = 1000;
+      let page = 1;
+      let allData = [];
+
+      while (true) {
+        const res = await API.get("/expenses", {
+          params: {
+            startDate: "01/01/1970",
+            endDate: "31/12/2999",
+            page,
+            limit
+          }
+        });
+
+        const pageData = Array.isArray(res.data) ? res.data : [];
+        allData = allData.concat(pageData);
+
+        if (pageData.length < limit) break;
+        page += 1;
+      }
 
       // 1. Calculate Total Spent
-      const totalSpent = data.reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
+      const totalSpent = allData.reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
       setTotal(totalSpent);
 
       // 2. Calculate Monthly Spent
@@ -49,7 +67,7 @@ export default function Dashboard() {
       const thisMonth = now.getMonth();
       const thisYear = now.getFullYear();
 
-      const monthlySpent = data
+      const monthlySpent = allData
         .filter(item => {
           const d = new Date(item.date || item.createdAt);
           return d.getMonth() === thisMonth && d.getFullYear() === thisYear;
@@ -59,9 +77,9 @@ export default function Dashboard() {
       setMonthly(monthlySpent);
 
       // 3. Set Expenses for Activity List (Top 5 recent)
-      setAllExpenses(data);
-      setExpenses(data.slice(0, 5));
-      setCount(data.length);
+      setAllExpenses(allData);
+      setExpenses(allData.slice(0, 5));
+      setCount(allData.length);
 
     } catch (err) {
       console.log("Dashboard load error:", err);

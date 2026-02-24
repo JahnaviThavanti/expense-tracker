@@ -3,8 +3,11 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import Navbar from "../components/Navbar";
 import Sidebar from "../components/Sidebar";
-import CategorySelector from "../components/CategorySelector";
 import "../styles/expense-tracker-forms.css";
+import "../styles/shared-datepicker.css";
+import useExpenseDateHighlights, {
+  clearExpenseDateHighlightsCache
+} from "../hooks/useExpenseDateHighlights";
 
 import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
@@ -14,18 +17,24 @@ export default function AddExpense() {
   const navigate = useNavigate();
 
   const [amount, setAmount] = useState("");
-  const [category, setCategory] = useState("Food");
+  const [category, setCategory] = useState("");
   const [date, setDate] = useState(new Date());
   const [note, setNote] = useState("");
   const [loading, setLoading] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const { hasExpenseOnDate } = useExpenseDateHighlights();
   
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    const trimmedCategory = category.trim();
 
     if (!amount || Number(amount) <= 0) {
       alert("Enter valid amount");
+      return;
+    }
+    if (!trimmedCategory) {
+      alert("Enter expense type");
       return;
     }
 
@@ -33,15 +42,16 @@ export default function AddExpense() {
 
     try {
       await API.post("/expenses", {
-        title: note || category,
+        title: note || trimmedCategory,
         amount: Number(amount),
-        category,
+        category: trimmedCategory,
         date: date ? new Date(date) : new Date(),
         note,
         paymentMethod: "Manual"
       });
 
       alert("Expense saved successfully 🚀");
+      clearExpenseDateHighlightsCache();
       navigate("/expenses");
 
     } catch (err) {
@@ -83,8 +93,14 @@ export default function AddExpense() {
             <div className="expense-grid">
 
               <div>
-                <label>Category</label>
-                <CategorySelector value={category} onChange={setCategory} />
+                <label>Expense Type</label>
+                <input
+                  type="text"
+                  placeholder="Ex: Food, Gym, Rent"
+                  value={category}
+                  onChange={(e) => setCategory(e.target.value)}
+                  className="expense-input"
+                />
               </div>
 
               <div>
@@ -110,8 +126,11 @@ export default function AddExpense() {
                   isClearable
 
                   /* STYLE */
-                  className="date-picker-input expense-input"
+                  className="date-picker-input"
                   calendarClassName="modern-calendar"
+                  dayClassName={(day) =>
+                    hasExpenseOnDate(day) ? "expense-day-highlight" : undefined
+                  }
                 />
               </div>
 
