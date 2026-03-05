@@ -30,7 +30,7 @@ export default function ChartSection({ expenses }) {
           data={pieData}
           dataKey="value"
           outerRadius={100}
-          label={({name,percent}) =>
+          label={({percent}) =>
             `${name} ${(percent*100).toFixed(0)}%`
           }
         >

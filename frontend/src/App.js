@@ -5,6 +5,7 @@ import Signup from "./pages/signup";
 import Dashboard from "./pages/dashboard";
 import Expenses from "./pages/expenses";
 import AddExpense from "./pages/add-expense";
+import Categories from "./pages/categories";
 import Reports from "./pages/reports";
 import Profile from "./pages/profile";
 import Settings from "./pages/settings";
@@ -63,6 +64,12 @@ function App() {
         <Route path="/add-expense" element={
           <PrivateRoute>
             <AddExpense />
+          </PrivateRoute>
+        } />
+
+        <Route path="/categories" element={
+          <PrivateRoute>
+            <Categories />
           </PrivateRoute>
         } />
 

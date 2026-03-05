@@ -1,6 +1,6 @@
 import API from "../utils/api";
-import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useState, useEffect } from "react";
+import { useNavigate, Link } from "react-router-dom";
 import Navbar from "../components/Navbar";
 import Sidebar from "../components/Sidebar";
 import "../styles/expense-tracker-forms.css";
@@ -22,7 +22,45 @@ export default function AddExpense() {
   const [note, setNote] = useState("");
   const [loading, setLoading] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [categories, setCategories] = useState([]);
+  const [categoriesLoading, setCategoriesLoading] = useState(false);
   const { hasExpenseOnDate } = useExpenseDateHighlights();
+
+  // Fetch categories on component load
+  useEffect(() => {
+    fetchCategories();
+  }, []);
+
+  useEffect(() => {
+    const reloadOnFocus = () => fetchCategories();
+    const reloadOnVisible = () => {
+      if (document.visibilityState === "visible") {
+        fetchCategories();
+      }
+    };
+
+    window.addEventListener("focus", reloadOnFocus);
+    document.addEventListener("visibilitychange", reloadOnVisible);
+
+    return () => {
+      window.removeEventListener("focus", reloadOnFocus);
+      document.removeEventListener("visibilitychange", reloadOnVisible);
+    };
+  }, []);
+
+  const fetchCategories = async () => {
+    try {
+      setCategoriesLoading(true);
+      const response = await API.get("/categories");
+      const rows = Array.isArray(response.data) ? response.data : [];
+      setCategories(rows);
+    } catch (err) {
+      console.error("Failed to load categories");
+      setCategories([]);
+    } finally {
+      setCategoriesLoading(false);
+    }
+  };
   
 
   const handleSubmit = async (e) => {
@@ -34,7 +72,7 @@ export default function AddExpense() {
       return;
     }
     if (!trimmedCategory) {
-      alert("Enter expense type");
+      alert("Please select a category");
       return;
     }
 
@@ -93,14 +131,27 @@ export default function AddExpense() {
             <div className="expense-grid">
 
               <div>
-                <label>Expense Type</label>
-                <input
-                  type="text"
-                  placeholder="Ex: Food, Gym, Rent"
+                <label>
+                  Expense Type
+                  <Link to="/categories" className="add-new-category-link">
+                    + Add New
+                  </Link>
+                </label>
+                <select
                   value={category}
                   onChange={(e) => setCategory(e.target.value)}
-                  className="expense-input"
-                />
+                  className="category-select"
+                  disabled={categoriesLoading}
+                >
+                  <option value="">
+                    {categoriesLoading ? "Loading..." : "Select a category"}
+                  </option>
+                  {categories.map((cat) => (
+                    <option key={cat._id} value={cat.name}>
+                      {cat.name}
+                    </option>
+                  ))}
+                </select>
               </div>
 
               <div>

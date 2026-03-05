@@ -1,0 +1,265 @@
+/* PAGE WRAPPER */
+.categories-page {
+  max-width: 900px;
+  margin: auto;
+  padding: 30px 20px;
+}
+
+/* HEADER */
+.categories-header h1 {
+  font-size: 32px;
+  margin-bottom: 5px;
+  color: #ffffff;
+}
+
+.categories-header p {
+  color: #94a3b8;
+  margin-bottom: 30px;
+  font-size: 16px;
+}
+
+/* ADD CATEGORY CARD */
+.add-category-card {
+  background: #020617;
+  padding: 35px;
+  border-radius: 18px;
+  box-shadow: 0 15px 40px rgba(0, 0, 0, 0.45);
+  margin-bottom: 30px;
+  border: 1px solid #1e293b;
+}
+
+.add-category-card h2 {
+  font-size: 20px;
+  margin-bottom: 20px;
+  color: #ffffff;
+}
+
+.add-category-input-group {
+  display: flex;
+  gap: 12px;
+  align-items: flex-end;
+}
+
+.category-input {
+  flex: 1;
+  height: 48px;
+  padding: 0 14px;
+  border-radius: 12px;
+  border: 1px solid #1e293b;
+  background: #0f172a;
+  color: #ffffff;
+  font-size: 14px;
+  outline: none;
+  transition: 0.2s;
+}
+
+.category-input:focus {
+  border-color: #7c5cff;
+  background: #0f172a;
+  box-shadow: 0 0 0 3px rgba(124, 92, 255, 0.1);
+}
+
+.category-input::placeholder {
+  color: #64748b;
+}
+
+.add-category-btn {
+  height: 48px;
+  padding: 0 24px;
+  border-radius: 12px;
+  border: none;
+  background: linear-gradient(135deg, #7c5cff 0%, #6b4dd0 100%);
+  color: #ffffff;
+  font-weight: 600;
+  font-size: 14px;
+  cursor: pointer;
+  transition: 0.2s;
+  white-space: nowrap;
+}
+
+.add-category-btn:hover:not(:disabled) {
+  background: linear-gradient(135deg, #8967ff 0%, #7557d9 100%);
+  transform: translateY(-2px);
+  box-shadow: 0 10px 25px rgba(124, 92, 255, 0.3);
+}
+
+.add-category-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* CATEGORIES LIST CARD */
+.categories-list-card {
+  background: #020617;
+  padding: 35px;
+  border-radius: 18px;
+  box-shadow: 0 15px 40px rgba(0, 0, 0, 0.45);
+  border: 1px solid #1e293b;
+}
+
+.categories-list-card h2 {
+  font-size: 20px;
+  margin-bottom: 20px;
+  color: #ffffff;
+}
+
+/* EMPTY STATE */
+.empty-state {
+  text-align: center;
+  padding: 40px 20px;
+  color: #94a3b8;
+}
+
+/* CATEGORIES GRID */
+.categories-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 16px;
+}
+
+/* CATEGORY ITEM */
+.category-item {
+  background: #0f172a;
+  border: 1px solid #1e293b;
+  border-radius: 12px;
+  padding: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  transition: 0.2s;
+}
+
+.category-item:hover {
+  border-color: #7c5cff;
+  box-shadow: 0 5px 15px rgba(124, 92, 255, 0.15);
+}
+
+.category-name {
+  color: #ffffff;
+  font-size: 15px;
+  font-weight: 500;
+  flex: 1;
+  word-break: break-word;
+}
+
+/* CATEGORY ACTIONS */
+.category-actions {
+  display: flex;
+  gap: 8px;
+  margin-left: 12px;
+}
+
+.edit-btn,
+.delete-btn {
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 15px;
+  transition: 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.edit-btn:hover {
+  background: rgba(124, 92, 255, 0.2);
+}
+
+.delete-btn:hover {
+  background: rgba(239, 68, 68, 0.2);
+}
+
+/* EDIT MODE */
+.category-edit-mode {
+  width: 100%;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.category-edit-input {
+  flex: 1;
+  height: 36px;
+  padding: 0 12px;
+  border-radius: 8px;
+  border: 1px solid #7c5cff;
+  background: #020617;
+  color: #ffffff;
+  font-size: 14px;
+  outline: none;
+}
+
+.category-edit-input:focus {
+  box-shadow: 0 0 0 3px rgba(124, 92, 255, 0.2);
+}
+
+.edit-buttons {
+  display: flex;
+  gap: 6px;
+}
+
+.edit-save-btn,
+.edit-cancel-btn {
+  height: 36px;
+  padding: 0 12px;
+  border-radius: 8px;
+  border: none;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: 0.2s;
+}
+
+.edit-save-btn {
+  background: #10b981;
+  color: #ffffff;
+}
+
+.edit-save-btn:hover {
+  background: #059669;
+}
+
+.edit-cancel-btn {
+  background: #6b7280;
+  color: #ffffff;
+}
+
+.edit-cancel-btn:hover {
+  background: #4b5563;
+}
+
+/* RESPONSIVE */
+@media (max-width: 768px) {
+  .categories-page {
+    padding: 20px 16px;
+  }
+
+  .add-category-card,
+  .categories-list-card {
+    padding: 20px;
+  }
+
+  .categories-header h1 {
+    font-size: 24px;
+  }
+
+  .add-category-input-group {
+    flex-direction: column;
+  }
+
+  .category-input,
+  .add-category-btn {
+    width: 100%;
+  }
+
+  .categories-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .category-item {
+    padding: 14px;
+  }
+}

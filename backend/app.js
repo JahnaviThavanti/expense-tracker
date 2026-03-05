@@ -8,6 +8,7 @@ const app = express();
 const authRoutes = require("./routes/auth");
 const expenseRoutes = require("./routes/expense");
 const userRoutes = require("./routes/user");
+const categoryRoutes = require("./routes/categories");
 
 
 app.use(cors());
@@ -21,6 +22,7 @@ app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 app.use("/api/auth", authRoutes);
 app.use("/api/expenses", expenseRoutes);
 app.use("/api/user", userRoutes);
+app.use("/api/categories", categoryRoutes);
 
 
 app.get("/", (req, res) => {

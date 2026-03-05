@@ -269,3 +269,80 @@
     margin-top: 20px;
   }
 }
+
+.report-chart-grid {
+  gap: 20px;
+}
+
+.report-chart-card {
+  background: #3d2c5c;
+  padding: 20px;
+  border-radius: 12px;
+}
+
+.report-chart-card h3 {
+  margin: 0;
+}
+
+.report-chart-card--wide {
+  flex: 1 1 600px;
+}
+
+.report-chart-card--narrow {
+  flex: 1 1 420px;
+  min-height: 380px;
+}
+
+.report-chart-card--full {
+  flex: 1 1 100%;
+}
+
+.report-chart-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.chart-mode-buttons {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.chart-mode-btn {
+  background: #0f172a;
+  color: #e2e8f0;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: 0.2s ease;
+}
+
+.chart-mode-btn:hover {
+  border-color: #94a3b8;
+}
+
+.chart-mode-btn.active {
+  background: #22d3ee;
+  color: #0f172a;
+  border-color: #22d3ee;
+  font-weight: 600;
+}
+
+.chart-note {
+  margin-top: 4px;
+  margin-bottom: 12px;
+  color: #cbd5e1;
+  font-size: 13px;
+}
+
+@media (max-width: 900px) {
+  .report-chart-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import API from "../utils/api";
 import Navbar from "../components/Navbar";
 import Sidebar from "../components/Sidebar";
@@ -9,7 +9,8 @@ import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
 
 import {
-  LineChart,
+  ComposedChart,
+  Bar,
   Line,
   XAxis,
   YAxis,
@@ -24,81 +25,137 @@ import {
   ReferenceLine
 } from "recharts";
 
-export default function Reports() {
+const DAILY_GRAPH_MODES = ["line", "bar", "both"];
+const MONTH_GRAPH_MODES = ["line", "bar", "both"];
+const COLORS = [
+  "#6C5DD3",
+  "#00C49F",
+  "#FFBB28",
+  "#FF8042",
+  "#AF19FF",
+  "#FF4560",
+  "#22c55e",
+  "#ef4444"
+];
 
-  const [expenses, setExpenses] = useState([]);
+const formatDateForApi = (dateValue) => {
+  const day = String(dateValue.getDate()).padStart(2, "0");
+  const month = String(dateValue.getMonth() + 1).padStart(2, "0");
+  const year = dateValue.getFullYear();
+  return `${day}/${month}/${year}`;
+};
+
+const getMonthName = (month, year) =>
+  new Date(year, month, 1).toLocaleString("en-US", {
+    month: "short",
+    year: "numeric"
+  });
+
+const isValidDate = (value) =>
+  value instanceof Date && !Number.isNaN(value.getTime());
+
+export default function Reports() {
   const [monthlyTotal, setMonthlyTotal] = useState(0);
   const [lastMonthTotal, setLastMonthTotal] = useState(0);
-  const [lastMonthLabel, setLastMonthLabel] = useState("");
+  const [lastMonthLabel, setLastMonthLabel] = useState("No data");
   const [currentMonthLabel, setCurrentMonthLabel] = useState("");
   const [topCategory, setTopCategory] = useState("None");
   const [transactions, setTransactions] = useState(0);
-  const [loading, setLoading] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
 
   const [dailyChartData, setDailyChartData] = useState([]);
   const [categoryChartData, setCategoryChartData] = useState([]);
+  const [twelveMonthChartData, setTwelveMonthChartData] = useState([]);
 
-  const COLORS = ["#6C5DD3","#00C49F","#FFBB28","#FF8042","#AF19FF","#FF4560","#22c55e","#ef4444"];
+  const [dailyGraphMode, setDailyGraphMode] = useState("line");
+  const [monthGraphMode, setMonthGraphMode] = useState("line");
+  const [isCompactPie, setIsCompactPie] = useState(
+    typeof window !== "undefined" ? window.innerWidth < 1200 : false
+  );
 
   const [filterMonth, setFilterMonth] = useState("");
   const [filterYear, setFilterYear] = useState("");
   const [filterDate, setFilterDate] = useState(null);
   const { hasExpenseOnDate } = useExpenseDateHighlights();
 
-  const money = (val) =>
+  const money = (value) =>
     new Intl.NumberFormat("en-US", {
       style: "currency",
       currency: "USD"
-    }).format(Number(val || 0));
+    }).format(Number(value || 0));
 
-  const getMonthName = (month, year) =>
-    new Date(year, month).toLocaleString("en-US", { month: "short", year: "numeric" });
+  const selectedContext = useMemo(() => {
+    const now = new Date();
+    const selectedBaseDate = filterDate || now;
+    return {
+      month: filterMonth ? Number(filterMonth) - 1 : selectedBaseDate.getMonth(),
+      year: filterYear ? Number(filterYear) : selectedBaseDate.getFullYear()
+    };
+  }, [filterDate, filterMonth, filterYear]);
 
   useEffect(() => {
     loadReport();
-  }, [filterMonth, filterYear, filterDate]);
+  }, [selectedContext.month, selectedContext.year, filterDate]);
 
-  const resetAllStates = () => {
-    setMonthlyTotal(0);
-    setLastMonthTotal(0);
-    setTransactions(0);
-    setTopCategory("None");
-    setDailyChartData([]);
-    setCategoryChartData([]);
-  };
+  useEffect(() => {
+    const handleResize = () => {
+      setIsCompactPie(window.innerWidth < 1200);
+    };
+
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
 
   const loadReport = async () => {
     try {
-      setLoading(true);
-
-      const now = new Date();
-      const selectedBaseDate = filterDate || now;
-      const selectedMonth = filterMonth
-        ? Number(filterMonth) - 1
-        : selectedBaseDate.getMonth();
-      const selectedYear = filterYear
-        ? Number(filterYear)
-        : selectedBaseDate.getFullYear();
-
+      const selectedMonth = selectedContext.month;
+      const selectedYear = selectedContext.year;
       setCurrentMonthLabel(getMonthName(selectedMonth, selectedYear));
 
-      const query = `/expenses?limit=8000&month=${selectedMonth + 1}&year=${selectedYear}`;
+      const monthRes = await API.get(
+        `/expenses?limit=8000&month=${selectedMonth + 1}&year=${selectedYear}`
+      );
+      const monthRows = Array.isArray(monthRes.data) ? monthRes.data : [];
 
-      const res = await API.get(query);
-      const data = Array.isArray(res.data) ? res.data : [];
-      setExpenses(data);
-
-      if (!data.length) {
-        resetAllStates();
-        setLastMonthLabel("No data");
-        return;
-      }
-
+      const categoryMap = {};
+      const dailyMap = {};
       let total = 0;
       let count = 0;
-      let categoryMap = {};
-      let dailyMap = {};
+
+      monthRows.forEach((expense) => {
+        const dateValue = new Date(expense.date || expense.createdAt);
+        if (!isValidDate(dateValue)) return;
+
+        const amount = Number(expense.amount || 0);
+        total += amount;
+        count += 1;
+
+        const category = expense.category || "Other";
+        categoryMap[category] = (categoryMap[category] || 0) + amount;
+
+        const day = dateValue.getDate();
+        dailyMap[day] = (dailyMap[day] || 0) + amount;
+      });
+
+      setMonthlyTotal(total);
+      setTransactions(count);
+
+      const categoryEntries = Object.keys(categoryMap).map((name) => ({
+        name,
+        value: categoryMap[name]
+      }));
+      setCategoryChartData(categoryEntries);
+
+      let maxCategory = "None";
+      let maxValue = 0;
+      categoryEntries.forEach((entry) => {
+        if (entry.value > maxValue) {
+          maxValue = entry.value;
+          maxCategory = entry.name;
+        }
+      });
+      setTopCategory(maxCategory);
+
       const selectedDay =
         filterDate &&
         filterDate.getMonth() === selectedMonth &&
@@ -106,85 +163,81 @@ export default function Reports() {
           ? filterDate.getDate()
           : null;
 
-      data.forEach(e => {
-        const d = new Date(e.date || e.createdAt);
-        if (isNaN(d)) return;
-
-        const amt = Number(e.amount || 0);
-
-        if (d.getMonth() === selectedMonth && d.getFullYear() === selectedYear) {
-          total += amt;
-          count++;
-
-          const cat = e.category || "Other";
-          categoryMap[cat] = (categoryMap[cat] || 0) + amt;
-
-          const day = d.getDate();
-          dailyMap[day] = (dailyMap[day] || 0) + amt;
-        }
+      const daysInMonth = new Date(selectedYear, selectedMonth + 1, 0).getDate();
+      const dailySeries = Array.from({ length: daysInMonth }, (_, index) => {
+        const day = index + 1;
+        return {
+          day,
+          amount: Number(dailyMap[day] || 0),
+          isSelected: selectedDay === day
+        };
       });
+      setDailyChartData(dailySeries);
 
-      setMonthlyTotal(total);
-      setTransactions(count);
-
-      // AUTO FIND PREVIOUS MONTH WITH DATA
-      let prevTotal = 0;
-      let searchMonth = selectedMonth;
-      let searchYear = selectedYear;
-
-      for (let i = 0; i < 12; i++) {
-        searchMonth--;
-        if (searchMonth < 0) {
-          searchMonth = 11;
-          searchYear--;
-        }
-
-        const prevRes = await API.get(
-          `/expenses?month=${searchMonth + 1}&year=${searchYear}&limit=8000`
+      let previousTotal = 0;
+      let previousLabel = "No data";
+      for (let offset = 1; offset <= 12; offset += 1) {
+        const d = new Date(selectedYear, selectedMonth - offset, 1);
+        const res = await API.get(
+          `/expenses?month=${d.getMonth() + 1}&year=${d.getFullYear()}&limit=8000`
         );
-        const prevData = prevRes.data || [];
+        const rows = Array.isArray(res.data) ? res.data : [];
 
-        if (prevData.length) {
-          prevTotal = prevData.reduce((s, e) => s + Number(e.amount || 0), 0);
-          setLastMonthLabel(getMonthName(searchMonth, searchYear));
+        if (rows.length) {
+          previousTotal = rows.reduce(
+            (sum, item) => sum + Number(item.amount || 0),
+            0
+          );
+          previousLabel = getMonthName(d.getMonth(), d.getFullYear());
           break;
         }
       }
+      setLastMonthTotal(previousTotal);
+      setLastMonthLabel(previousLabel);
 
-      setLastMonthTotal(prevTotal);
-
-      // TOP CATEGORY
-      let maxCat = "";
-      let maxVal = 0;
-      Object.keys(categoryMap).forEach(c => {
-        if (categoryMap[c] > maxVal) {
-          maxVal = categoryMap[c];
-          maxCat = c;
+      const rangeStart = new Date(selectedYear, 0, 1);
+      const rangeEnd = new Date(selectedYear, 11, 31);
+      const rangeRes = await API.get("/expenses", {
+        params: {
+          startDate: formatDateForApi(rangeStart),
+          endDate: formatDateForApi(rangeEnd),
+          limit: 20000
         }
       });
-      setTopCategory(maxCat || "None");
+      const rangeRows = Array.isArray(rangeRes.data) ? rangeRes.data : [];
 
-      // CATEGORY CHART DATA
-      const cData = Object.keys(categoryMap).map(key => ({
-        name: key,
-        value: categoryMap[key]
-      }));
-      setCategoryChartData(cData);
+      const monthlyTotalsMap = {};
+      rangeRows.forEach((expense) => {
+        const d = new Date(expense.date || expense.createdAt);
+        if (!isValidDate(d)) return;
+        const key = `${d.getFullYear()}-${d.getMonth()}`;
+        monthlyTotalsMap[key] =
+          (monthlyTotalsMap[key] || 0) + Number(expense.amount || 0);
+      });
 
-      // DAILY DATA
-      const dData = Object.keys(dailyMap).map(key => ({
-        day: Number(key),
-        amount: dailyMap[key],
-        isSelected: selectedDay !== null && Number(key) === selectedDay
-      }));
-      dData.sort((a, b) => Number(a.day) - Number(b.day));
-      setDailyChartData(dData);
-
+      const monthSeries = Array.from({ length: 12 }, (_, index) => {
+        const d = new Date(selectedYear, index, 1);
+        const key = `${d.getFullYear()}-${d.getMonth()}`;
+        return {
+          label: d.toLocaleString("en-US", { month: "short", year: "numeric" }),
+          amount: Number(monthlyTotalsMap[key] || 0),
+          monthIndex: d.getMonth(),
+          year: d.getFullYear(),
+          isSelectedMonth:
+            d.getMonth() === selectedMonth && d.getFullYear() === selectedYear
+        };
+      });
+      setTwelveMonthChartData(monthSeries);
     } catch (err) {
       console.log("Report error:", err);
-      resetAllStates();
-    } finally {
-      setLoading(false);
+      setMonthlyTotal(0);
+      setLastMonthTotal(0);
+      setLastMonthLabel("No data");
+      setTransactions(0);
+      setTopCategory("None");
+      setDailyChartData([]);
+      setCategoryChartData([]);
+      setTwelveMonthChartData([]);
     }
   };
 
@@ -196,8 +249,11 @@ export default function Reports() {
 
   const diff = monthlyTotal - lastMonthTotal;
   const percentChange =
-    lastMonthTotal > 0 ? ((diff / lastMonthTotal) * 100).toFixed(1) : 0;
-  const selectedDayForView = filterDate ? filterDate.getDate() : null;
+    lastMonthTotal > 0 ? ((diff / lastMonthTotal) * 100).toFixed(1) : "0.0";
+  const selectedDayForView =
+    dailyChartData.find((item) => item.isSelected)?.day || null;
+  const selectedMonthLabelForView =
+    twelveMonthChartData.find((item) => item.isSelectedMonth)?.label || null;
 
   return (
     <div className="dashboard-container">
@@ -217,7 +273,11 @@ export default function Reports() {
             }}
           >
             <option value="">Month</option>
-            {[...Array(12)].map((_,i)=>(<option key={i} value={i+1}>{i+1}</option>))}
+            {[...Array(12)].map((_, i) => (
+              <option key={i} value={i + 1}>
+                {i + 1}
+              </option>
+            ))}
           </select>
 
           <select
@@ -228,7 +288,10 @@ export default function Reports() {
             }}
           >
             <option value="">Year</option>
-            <option>2023</option><option>2024</option><option>2025</option><option>2026</option>
+            <option>2023</option>
+            <option>2024</option>
+            <option>2025</option>
+            <option>2026</option>
           </select>
 
           <DatePicker
@@ -258,7 +321,6 @@ export default function Reports() {
           <button onClick={resetFilters}>Reset</button>
         </div>
 
-        {/* SUMMARY */}
         <div className="report-cards">
           <div className="report-card">
             <h3>This Month ({currentMonthLabel})</h3>
@@ -282,121 +344,144 @@ export default function Reports() {
 
           <div className="report-card">
             <h3>Comparison</h3>
-            <h2 style={{ color: diff>=0?"#22c55e":"#ef4444" }}>
-              {diff>=0?"↑":"↓"} {percentChange}% ({money(diff)})
+            <h2 style={{ color: diff >= 0 ? "#22c55e" : "#ef4444" }}>
+              {diff >= 0 ? "Up" : "Down"} {percentChange}% ({money(diff)})
             </h2>
           </div>
         </div>
 
-        {/* CHARTS */}
-        <div className="charts-container" style={{ display:"flex",flexWrap:"wrap",gap:"20px",marginTop:"20px" }}>
-          
-          {/* LINE */}
-          <div style={{ flex:"1 1 600px",background:"#3d2c5c",padding:"20px",borderRadius:"10px" }}>
-            <h3>Daily Expenses</h3>
+        <div className="charts-container report-chart-grid">
+          <div className="report-chart-card report-chart-card--wide">
+            <div className="report-chart-header">
+              <h3>Daily Expenses</h3>
+              <div className="chart-mode-buttons">
+                {DAILY_GRAPH_MODES.map((mode) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    className={`chart-mode-btn ${
+                      dailyGraphMode === mode ? "active" : ""
+                    }`}
+                    onClick={() => setDailyGraphMode(mode)}
+                  >
+                    {mode === "both"
+                      ? "Both"
+                      : mode.charAt(0).toUpperCase() + mode.slice(1)}
+                  </button>
+                ))}
+              </div>
+            </div>
+
             {filterDate && (
-              <p style={{ marginTop: "4px", marginBottom: "12px", color: "#cbd5e1" }}>
-                Showing monthly data for {currentMonthLabel}. Selected date {filterDate.toLocaleDateString("en-GB")} is highlighted.
+              <p className="chart-note">
+                Showing monthly data for {currentMonthLabel}. Selected date{" "}
+                {filterDate.toLocaleDateString("en-GB")} is highlighted.
               </p>
             )}
+
             <ResponsiveContainer width="100%" height={350}>
-            <LineChart
-              data={dailyChartData}
-              margin={{ top: 20, right: 20, left: 0, bottom: 5 }}
-            >
-              <CartesianGrid stroke="rgba(255,255,255,0.08)" strokeDasharray="3 3" />
-
-              {/* Axis styling */}
-              <XAxis
-                dataKey="day"
-                tick={{ fill: "#fafcff", fontSize: 12 }}
-                axisLine={false}
-                tickLine={false}
-              />
-
-              <YAxis
-                tick={{ fill: "#fefeff", fontSize: 12 }}
-                axisLine={false}
-                tickLine={false}
-              />
-
-              {/* Tooltip */}
-              <Tooltip
-                cursor={{ fill: "rgba(99,102,241,0.08)" }}
-                formatter={(v)=>money(v)}
-                contentStyle={{
-                  background: "#0f172a",
-                  border: "none",
-                  borderRadius: "10px",
-                  color: "#fff"
-                }}
-              />
-
-              {/* Legend */}
-              <Legend />
-
-              {selectedDayForView && (
-                <ReferenceLine
-                  x={selectedDayForView}
-                  stroke="#facc15"
-                  strokeDasharray="4 4"
+              <ComposedChart
+                data={dailyChartData}
+                margin={{ top: 20, right: 20, left: 0, bottom: 5 }}
+              >
+                <CartesianGrid
+                  stroke="rgba(255,255,255,0.08)"
+                  strokeDasharray="3 3"
                 />
-              )}
+                <XAxis
+                  dataKey="day"
+                  interval={0}
+                  tick={{ fill: "#fafcff", fontSize: 11 }}
+                  axisLine={false}
+                  tickLine={false}
+                />
+                <YAxis
+                  tick={{ fill: "#fefeff", fontSize: 12 }}
+                  axisLine={false}
+                  tickLine={false}
+                />
+                <Tooltip
+                  formatter={(value) => money(value)}
+                  labelFormatter={(value) => `Day ${value}`}
+                  contentStyle={{
+                    background: "#0f172a",
+                    border: "none",
+                    borderRadius: "10px",
+                    color: "#fff"
+                  }}
+                />
+                <Legend />
 
-              {/* Daily trend line */}
-              <Line
-                type="monotone"
-                dataKey="amount"
-                stroke="#22d3ee"
-                strokeWidth={3}
-                animationDuration={900}
-                dot={({ cx, cy, payload }) => (
-                  <circle
-                    cx={cx}
-                    cy={cy}
-                    r={payload?.isSelected ? 6 : 4}
-                    fill={payload?.isSelected ? "#facc15" : "#22d3ee"}
-                    stroke={payload?.isSelected ? "#fff" : "#0f172a"}
-                    strokeWidth={payload?.isSelected ? 2 : 1}
+                {selectedDayForView && (
+                  <ReferenceLine
+                    x={selectedDayForView}
+                    stroke="#facc15"
+                    strokeDasharray="4 4"
                   />
                 )}
-                activeDot={{ r: 6, fill: "#facc15", stroke: "#fff", strokeWidth: 2 }}
-              >
-              </Line>
 
-            </LineChart>
-          </ResponsiveContainer>
+                {(dailyGraphMode === "bar" || dailyGraphMode === "both") && (
+                  <Bar
+                    dataKey="amount"
+                    name="Daily Total (Bar)"
+                    radius={[6, 6, 0, 0]}
+                    animationDuration={800}
+                  >
+                    {dailyChartData.map((entry, index) => (
+                      <Cell
+                        key={`daily-bar-${entry.day}-${index}`}
+                        fill={entry.isSelected ? "#facc15" : "#38bdf8"}
+                      />
+                    ))}
+                  </Bar>
+                )}
 
+                {(dailyGraphMode === "line" || dailyGraphMode === "both") && (
+                  <Line
+                    type="monotone"
+                    dataKey="amount"
+                    name="Daily Total (Line)"
+                    stroke="#22d3ee"
+                    strokeWidth={3}
+                    animationDuration={900}
+                    dot={({ cx, cy, payload }) => (
+                      <circle
+                        cx={cx}
+                        cy={cy}
+                        r={payload?.isSelected ? 6 : 4}
+                        fill={payload?.isSelected ? "#facc15" : "#22d3ee"}
+                        stroke={payload?.isSelected ? "#fff" : "#0f172a"}
+                        strokeWidth={payload?.isSelected ? 2 : 1}
+                      />
+                    )}
+                    activeDot={{
+                      r: 6,
+                      fill: "#facc15",
+                      stroke: "#fff",
+                      strokeWidth: 2
+                    }}
+                  />
+                )}
+              </ComposedChart>
+            </ResponsiveContainer>
           </div>
 
-          {/* PREMIUM DONUT */}
-          <div
-            style={{
-              flex: "1 1 420px",
-              background: "#3d2c5c",
-              padding: "24px",
-              borderRadius: "14px",
-              position: "relative",
-              minHeight: "420px"
-            }}
-          >
-            <h3 style={{ marginBottom: "10px" }}>Category Breakdown</h3>
-            <ResponsiveContainer width="100%" height={350}>
+          <div className="report-chart-card report-chart-card--narrow">
+            <h3>Category Breakdown</h3>
+            <ResponsiveContainer width="100%" height={isCompactPie ? 360 : 420}>
               <PieChart>
                 <Pie
                   data={categoryChartData}
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={75}
-                  outerRadius={115}
+                  cx={isCompactPie ? "50%" : "42%"}
+                  cy={isCompactPie ? "44%" : "50%"}
+                  innerRadius={isCompactPie ? "28%" : "34%"}
+                  outerRadius={isCompactPie ? "45%" : "62%"}
                   dataKey="value"
                   paddingAngle={3}
-                  lableLine={true}
-                  label={({ cdname, percent }) =>
-                    percent > 0.07 ? `${name} ${(percent * 100).toFixed(0)}%`: ""
+                  labelLine={!isCompactPie}
+                  label={({ percent }) =>
+                    percent > 0.07 ? `${(percent * 100).toFixed(0)}%` : ""
                   }
-
-                  
                 >
                   {categoryChartData.map((entry, index) => (
                     <Cell key={index} fill={COLORS[index % COLORS.length]} />
@@ -412,9 +497,8 @@ export default function Reports() {
                     }}
                   />
                 </Pie>
-                {/* TOOLTIP*/}
                 <Tooltip
-                  formatter={(v)=>money(v)}
+                  formatter={(value) => money(value)}
                   contentStyle={{
                     background: "#0f172a",
                     border: "none",
@@ -422,29 +506,127 @@ export default function Reports() {
                     color: "#fff"
                   }}
                 />
-
-                {/* RESPONSIVE LEGEND */}
                 <Legend
-                  layout="vertical"
-                  align="right"
-                  verticalAlign="middle"
+                  layout={isCompactPie ? "horizontal" : "vertical"}
+                  align={isCompactPie ? "center" : "right"}
+                  verticalAlign={isCompactPie ? "bottom" : "middle"}
                   wrapperStyle={{
-                    paddingLeft: "10px",
-                    frontSize: "13px",
-
+                    paddingLeft: isCompactPie ? "0px" : "10px",
+                    fontSize: "13px"
                   }}
                 />
-
-                
               </PieChart>
             </ResponsiveContainer>
-
-            
-
-
-
           </div>
 
+          <div className="report-chart-card report-chart-card--full">
+            <div className="report-chart-header">
+              <h3>Last 12 Months Trend</h3>
+              <div className="chart-mode-buttons">
+                {MONTH_GRAPH_MODES.map((mode) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    className={`chart-mode-btn ${
+                      monthGraphMode === mode ? "active" : ""
+                    }`}
+                    onClick={() => setMonthGraphMode(mode)}
+                  >
+                    {mode === "both"
+                      ? "Both"
+                      : mode.charAt(0).toUpperCase() + mode.slice(1)}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <p className="chart-note">
+              Jan to Dec of selected year are shown. Months with no expense stay at 0.
+            </p>
+
+            <ResponsiveContainer width="100%" height={340}>
+              <ComposedChart
+                data={twelveMonthChartData}
+                margin={{ top: 20, right: 20, left: 0, bottom: 30 }}
+              >
+                <CartesianGrid
+                  stroke="rgba(255,255,255,0.08)"
+                  strokeDasharray="3 3"
+                />
+                <XAxis
+                  dataKey="label"
+                  interval={0}
+                  angle={-17}
+                  height={56}
+                  textAnchor="end"
+                  tick={{ fill: "#fafcff", fontSize: 9 }}
+                  axisLine={false}
+                  tickLine={false}
+                />
+                <YAxis
+                  tick={{ fill: "#fefeff", fontSize: 12 }}
+                  axisLine={false}
+                  tickLine={false}
+                />
+                <Tooltip
+                  formatter={(value) => money(value)}
+                  labelFormatter={(value) => value}
+                  contentStyle={{
+                    background: "#0f172a",
+                    border: "none",
+                    borderRadius: "10px",
+                    color: "#fff"
+                  }}
+                />
+                <Legend />
+
+                {selectedMonthLabelForView && (
+                  <ReferenceLine
+                    x={selectedMonthLabelForView}
+                    stroke="#facc15"
+                    strokeDasharray="4 4"
+                  />
+                )}
+
+                {(monthGraphMode === "bar" || monthGraphMode === "both") && (
+                  <Bar dataKey="amount" name="Monthly Total (Bar)" radius={[6, 6, 0, 0]}>
+                    {twelveMonthChartData.map((entry, index) => (
+                      <Cell
+                        key={`month-bar-${entry.label}-${index}`}
+                        fill={entry.isSelectedMonth ? "#facc15" : "#4ade80"}
+                      />
+                    ))}
+                  </Bar>
+                )}
+
+                {(monthGraphMode === "line" || monthGraphMode === "both") && (
+                  <Line
+                    type="monotone"
+                    dataKey="amount"
+                    name="Monthly Total (Line)"
+                    stroke="#22d3ee"
+                    strokeWidth={3}
+                    dot={({ cx, cy, payload }) => (
+                      <circle
+                        cx={cx}
+                        cy={cy}
+                        r={payload?.isSelectedMonth ? 6 : 4}
+                        fill={payload?.isSelectedMonth ? "#facc15" : "#22d3ee"}
+                        stroke={payload?.isSelectedMonth ? "#fff" : "#0f172a"}
+                        strokeWidth={payload?.isSelectedMonth ? 2 : 1}
+                      />
+                    )}
+                    activeDot={{
+                      r: 6,
+                      fill: "#facc15",
+                      stroke: "#fff",
+                      strokeWidth: 2
+                    }}
+                  />
+                )}
+              </ComposedChart>
+            </ResponsiveContainer>
+          </div>
         </div>
       </div>
     </div>

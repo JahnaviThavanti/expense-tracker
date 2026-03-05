@@ -49,9 +49,11 @@ The Expense Tracker enables users to:
 
 #### 🔧 Improvements Made
 
+
 **1. Replaced HTML Date Input**
 *   **Old:** `<input type="date" />`
 *   **New:** `react-datepicker`
+
 *   **Benefits:** Modern UI, Month/Year dropdowns, Scrollable year selection, Clearable input, Today shortcut.
 
 **2. Timezone Bug Fix (Critical Fix)**

@@ -12,6 +12,8 @@ import "react-datepicker/dist/react-datepicker.css";
 export default function Expenses() {
 
   const [expenses, setExpenses] = useState([]);
+  const [categories, setCategories] = useState([]);
+  const [categoriesLoading, setCategoriesLoading] = useState(false);
   const [search, setSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("");
   const [loading, setLoading] = useState(false);
@@ -34,6 +36,24 @@ export default function Expenses() {
   useEffect(() => {
     fetchExpenses();
   }, [search, categoryFilter, filterMonth, filterYear, filterDate]);
+
+  useEffect(() => {
+    fetchCategories();
+  }, []);
+
+  const fetchCategories = async () => {
+    try {
+      setCategoriesLoading(true);
+      const response = await API.get("/categories");
+      const rows = Array.isArray(response.data) ? response.data : [];
+      setCategories(rows);
+    } catch (err) {
+      console.log("Category load error:", err);
+      setCategories([]);
+    } finally {
+      setCategoriesLoading(false);
+    }
+  };
 
   const fetchExpenses = async () => {
     try {
@@ -158,14 +178,14 @@ export default function Expenses() {
           <select
             value={categoryFilter}
             onChange={(e) => setCategoryFilter(e.target.value)}
+            disabled={categoriesLoading}
           >
             <option value="">All Categories</option>
-            <option>Food</option>
-            <option>Shopping</option>
-            <option>Travel</option>
-            <option>Entertainment</option>
-            <option>Health</option>
-            <option>Other</option>
+            {categories.map((cat) => (
+              <option key={cat._id} value={cat.name}>
+                {cat.name}
+              </option>
+            ))}
           </select>
 
           {/* MONTH */}
