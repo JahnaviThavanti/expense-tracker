@@ -9,8 +9,7 @@ import {
   User,
   Settings,
   ChevronLeft,
-  ChevronRight,
-  Folder
+  ChevronRight
 } from "lucide-react";
 
 export default function Sidebar({ mobileOpen, setMobileOpen }) {
@@ -32,7 +31,7 @@ export default function Sidebar({ mobileOpen, setMobileOpen }) {
     { name: "Dashboard", path: "/dashboard", icon: Home },
     { name: "Expenses", path: "/expenses", icon: CreditCard },
     { name: "Add Expense", path: "/add-expense", icon: PlusCircle },
-    { name: "Categories", path: "/categories", icon: Folder },
+    { name: "Categories", path:"/categories", icon: Folder},
     { name: "Reports", path: "/reports", icon: BarChart3 },
     { name: "Profile", path: "/profile", icon: User },
   ];
