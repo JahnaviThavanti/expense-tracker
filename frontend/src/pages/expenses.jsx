@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import API from "../utils/api";
 import Navbar from "../components/Navbar";
 import Sidebar from "../components/Sidebar";
@@ -16,6 +16,7 @@ export default function Expenses() {
   const [categoriesLoading, setCategoriesLoading] = useState(false);
   const [search, setSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("");
+  const [sortBy, setSortBy] = useState("date");
   const [loading, setLoading] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [totalSpend, setTotalSpend] = useState(0);
@@ -32,6 +33,30 @@ export default function Expenses() {
     const day = String(value.getDate()).padStart(2, "0");
     return `${year}-${month}-${day}`;
   };
+
+  const formatDateMMDDYYYY = (value) => {
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime())) return "";
+    return new Intl.DateTimeFormat("en-US", {
+      month: "2-digit",
+      day: "2-digit",
+      year: "numeric"
+    }).format(d);
+  };
+
+  const visibleExpenses = useMemo(() => {
+    const list = Array.isArray(expenses) ? [...expenses] : [];
+    list.sort((a, b) => {
+      if (sortBy === "amount") {
+        const amountDiff = Number(b.amount || 0) - Number(a.amount || 0);
+        if (amountDiff !== 0) return amountDiff;
+      }
+      const da = new Date(a.createdAt || a.date).getTime();
+      const db = new Date(b.createdAt || b.date).getTime();
+      return db - da;
+    });
+    return list;
+  }, [expenses, sortBy]);
 
   useEffect(() => {
     fetchExpenses();
@@ -188,6 +213,11 @@ export default function Expenses() {
             ))}
           </select>
 
+          <select value={sortBy} onChange={(e) => setSortBy(e.target.value)}>
+            <option value="date">Sort by Date</option>
+            <option value="amount">Sort by Amount</option>
+          </select>
+
           {/* MONTH */}
           <select
             value={filterMonth}
@@ -225,7 +255,7 @@ export default function Expenses() {
               setFilterMonth("");
               setFilterYear("");
             }}
-            dateFormat="dd/MM/yyyy"
+            dateFormat="MM/dd/yyyy"
             placeholderText="Select date"
             showMonthDropdown
             showYearDropdown
@@ -260,7 +290,7 @@ export default function Expenses() {
           </p>
         ) : (
           <div className="expense-list">
-            {expenses.map((e) => (
+            {visibleExpenses.map((e) => (
               <div className="expense-card" key={e._id}>
 
                 <div className="expense-info">
@@ -270,8 +300,7 @@ export default function Expenses() {
                     <h3>{e.title || e.category}</h3>
                     <span className="expense-meta">
                       {e.category} •{" "}
-                      {new Date(e.date || e.createdAt)
-                        .toLocaleDateString("en-GB")}
+                      {formatDateMMDDYYYY(e.date || e.createdAt)}
                     </span>
                   </div>
                 </div>

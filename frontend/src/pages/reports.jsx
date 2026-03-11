@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import API from "../utils/api";
 import Navbar from "../components/Navbar";
 import Sidebar from "../components/Sidebar";
@@ -12,22 +12,32 @@ import {
   ComposedChart,
   Bar,
   Line,
+  ScatterChart,
+  Scatter,
   XAxis,
   YAxis,
   CartesianGrid,
-  Tooltip,
   Legend,
   ResponsiveContainer,
   PieChart,
   Pie,
   Cell,
   Label,
-  ReferenceLine
+  ReferenceLine,
+  Tooltip
 } from "recharts";
 
-const DAILY_GRAPH_MODES = ["line", "bar", "both"];
-const MONTH_GRAPH_MODES = ["line", "bar", "both"];
-const COLORS = [
+const TIME_FILTERS = [
+  { key: "all", label: "All" },
+  { key: "daily", label: "Daily" },
+  { key: "weekly", label: "Weekly" },
+  { key: "monthly", label: "Monthly" },
+  { key: "yearly", label: "Yearly" }
+];
+
+const CHART_MODES = ["line", "bar", "both"];
+
+const PIE_COLORS = [
   "#6C5DD3",
   "#00C49F",
   "#FFBB28",
@@ -39,10 +49,19 @@ const COLORS = [
 ];
 
 const formatDateForApi = (dateValue) => {
-  const day = String(dateValue.getDate()).padStart(2, "0");
-  const month = String(dateValue.getMonth() + 1).padStart(2, "0");
   const year = dateValue.getFullYear();
-  return `${day}/${month}/${year}`;
+  const month = String(dateValue.getMonth() + 1).padStart(2, "0");
+  const day = String(dateValue.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+
+const formatDateMMDDYYYY = (dateValue) => {
+  if (!(dateValue instanceof Date) || Number.isNaN(dateValue.getTime())) return "";
+  return new Intl.DateTimeFormat("en-US", {
+    month: "2-digit",
+    day: "2-digit",
+    year: "numeric"
+  }).format(dateValue);
 };
 
 const getMonthName = (month, year) =>
@@ -54,28 +73,72 @@ const getMonthName = (month, year) =>
 const isValidDate = (value) =>
   value instanceof Date && !Number.isNaN(value.getTime());
 
+const toStartOfDay = (dateValue) => {
+  const d = new Date(dateValue);
+  d.setHours(0, 0, 0, 0);
+  return d;
+};
+
+const dayKey = (dateValue) => {
+  const d = toStartOfDay(dateValue);
+  return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+};
+
+const getCategoryColor = (category) => {
+  const c = String(category || "").trim().toLowerCase();
+  if (c === "food") return "#f97316";
+  if (c === "transport") return "#3b82f6";
+  if (c === "shopping") return "#a855f7";
+  if (c === "bills") return "#ef4444";
+  if (c === "entertainment") return "#22c55e";
+  if (c === "others" || c === "other") return "#94a3b8";
+
+  // Stable fallback color for custom categories.
+  const s = c || "others";
+  let hash = 0;
+  for (let i = 0; i < s.length; i += 1) hash = (hash * 31 + s.charCodeAt(i)) >>> 0;
+  const hue = hash % 360;
+  return `hsl(${hue}, 75%, 60%)`;
+};
+
+const normalizeCategory = (value) => String(value || "Others").trim().toLowerCase() || "others";
+
+const minutesSinceMidnight = (dateValue) =>
+  dateValue.getHours() * 60 + dateValue.getMinutes();
+
+const formatTimeFromMinutes = (value) => {
+  const total = Math.max(0, Math.min(1439, Number(value || 0)));
+  const hours = Math.floor(total / 60);
+  const minutes = total % 60;
+  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
+};
+
 export default function Reports() {
-  const [monthlyTotal, setMonthlyTotal] = useState(0);
-  const [lastMonthTotal, setLastMonthTotal] = useState(0);
-  const [lastMonthLabel, setLastMonthLabel] = useState("No data");
-  const [currentMonthLabel, setCurrentMonthLabel] = useState("");
-  const [topCategory, setTopCategory] = useState("None");
-  const [transactions, setTransactions] = useState(0);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [timeFilter, setTimeFilter] = useState("all");
+  const [dailyMode, setDailyMode] = useState("line");
+  const [trendMode, setTrendMode] = useState("line");
+  const [monthMode, setMonthMode] = useState("line");
+  const [scatterCategoryFilters, setScatterCategoryFilters] = useState([]);
 
-  const [dailyChartData, setDailyChartData] = useState([]);
-  const [categoryChartData, setCategoryChartData] = useState([]);
-  const [twelveMonthChartData, setTwelveMonthChartData] = useState([]);
-
-  const [dailyGraphMode, setDailyGraphMode] = useState("line");
-  const [monthGraphMode, setMonthGraphMode] = useState("line");
-  const [isCompactPie, setIsCompactPie] = useState(
-    typeof window !== "undefined" ? window.innerWidth < 1200 : false
-  );
+  // Temporary UI disables (requested).
+  const TEMP_DISABLE_MONTHLY_SCATTER = true;
+  const TEMP_DISABLE_TWELVE_MONTH_TREND = false;
 
   const [filterMonth, setFilterMonth] = useState("");
   const [filterYear, setFilterYear] = useState("");
   const [filterDate, setFilterDate] = useState(null);
+
+  const [rangeExpenses, setRangeExpenses] = useState([]);
+  const [rangeLoading, setRangeLoading] = useState(false);
+  const [isCompactPie, setIsCompactPie] = useState(
+    typeof window !== "undefined" ? window.innerWidth < 1200 : false
+  );
+
+  const [clickedMonthlyExpense, setClickedMonthlyExpense] = useState(null);
+  const [clickedDailyExpense, setClickedDailyExpense] = useState(null);
+
+  const initialLoadedAtRef = useRef(Date.now());
   const { hasExpenseOnDate } = useExpenseDateHighlights();
 
   const money = (value) =>
@@ -93,167 +156,300 @@ export default function Reports() {
     };
   }, [filterDate, filterMonth, filterYear]);
 
-  useEffect(() => {
-    loadReport();
-  }, [selectedContext.month, selectedContext.year, filterDate]);
+  const currentMonthLabel = useMemo(
+    () => getMonthName(selectedContext.month, selectedContext.year),
+    [selectedContext.month, selectedContext.year]
+  );
 
   useEffect(() => {
-    const handleResize = () => {
-      setIsCompactPie(window.innerWidth < 1200);
-    };
-
+    const handleResize = () => setIsCompactPie(window.innerWidth < 1200);
     window.addEventListener("resize", handleResize);
     return () => window.removeEventListener("resize", handleResize);
   }, []);
 
-  const loadReport = async () => {
+  const loadRangeExpenses = async () => {
     try {
-      const selectedMonth = selectedContext.month;
+      setRangeLoading(true);
       const selectedYear = selectedContext.year;
-      setCurrentMonthLabel(getMonthName(selectedMonth, selectedYear));
+      const start = new Date(selectedYear - 1, 0, 1);
+      const end = new Date(selectedYear, 11, 31);
 
-      const monthRes = await API.get(
-        `/expenses?limit=8000&month=${selectedMonth + 1}&year=${selectedYear}`
-      );
-      const monthRows = Array.isArray(monthRes.data) ? monthRes.data : [];
+      const limit = 1000;
+      let page = 1;
+      let allRows = [];
 
-      const categoryMap = {};
-      const dailyMap = {};
-      let total = 0;
-      let count = 0;
-
-      monthRows.forEach((expense) => {
-        const dateValue = new Date(expense.date || expense.createdAt);
-        if (!isValidDate(dateValue)) return;
-
-        const amount = Number(expense.amount || 0);
-        total += amount;
-        count += 1;
-
-        const category = expense.category || "Other";
-        categoryMap[category] = (categoryMap[category] || 0) + amount;
-
-        const day = dateValue.getDate();
-        dailyMap[day] = (dailyMap[day] || 0) + amount;
-      });
-
-      setMonthlyTotal(total);
-      setTransactions(count);
-
-      const categoryEntries = Object.keys(categoryMap).map((name) => ({
-        name,
-        value: categoryMap[name]
-      }));
-      setCategoryChartData(categoryEntries);
-
-      let maxCategory = "None";
-      let maxValue = 0;
-      categoryEntries.forEach((entry) => {
-        if (entry.value > maxValue) {
-          maxValue = entry.value;
-          maxCategory = entry.name;
-        }
-      });
-      setTopCategory(maxCategory);
-
-      const selectedDay =
-        filterDate &&
-        filterDate.getMonth() === selectedMonth &&
-        filterDate.getFullYear() === selectedYear
-          ? filterDate.getDate()
-          : null;
-
-      const daysInMonth = new Date(selectedYear, selectedMonth + 1, 0).getDate();
-      const dailySeries = Array.from({ length: daysInMonth }, (_, index) => {
-        const day = index + 1;
-        return {
-          day,
-          amount: Number(dailyMap[day] || 0),
-          isSelected: selectedDay === day
-        };
-      });
-      setDailyChartData(dailySeries);
-
-      let previousTotal = 0;
-      let previousLabel = "No data";
-      for (let offset = 1; offset <= 12; offset += 1) {
-        const d = new Date(selectedYear, selectedMonth - offset, 1);
-        const res = await API.get(
-          `/expenses?month=${d.getMonth() + 1}&year=${d.getFullYear()}&limit=8000`
-        );
+      while (true) {
+        const res = await API.get("/expenses", {
+          params: {
+            startDate: formatDateForApi(start),
+            endDate: formatDateForApi(end),
+            page,
+            limit
+          }
+        });
         const rows = Array.isArray(res.data) ? res.data : [];
-
-        if (rows.length) {
-          previousTotal = rows.reduce(
-            (sum, item) => sum + Number(item.amount || 0),
-            0
-          );
-          previousLabel = getMonthName(d.getMonth(), d.getFullYear());
-          break;
-        }
+        allRows = allRows.concat(rows);
+        if (rows.length < limit) break;
+        page += 1;
       }
-      setLastMonthTotal(previousTotal);
-      setLastMonthLabel(previousLabel);
 
-      const rangeStart = new Date(selectedYear, 0, 1);
-      const rangeEnd = new Date(selectedYear, 11, 31);
-      const rangeRes = await API.get("/expenses", {
-        params: {
-          startDate: formatDateForApi(rangeStart),
-          endDate: formatDateForApi(rangeEnd),
-          limit: 20000
-        }
-      });
-      const rangeRows = Array.isArray(rangeRes.data) ? rangeRes.data : [];
-
-      const monthlyTotalsMap = {};
-      rangeRows.forEach((expense) => {
-        const d = new Date(expense.date || expense.createdAt);
-        if (!isValidDate(d)) return;
-        const key = `${d.getFullYear()}-${d.getMonth()}`;
-        monthlyTotalsMap[key] =
-          (monthlyTotalsMap[key] || 0) + Number(expense.amount || 0);
-      });
-
-      const monthSeries = Array.from({ length: 12 }, (_, index) => {
-        const d = new Date(selectedYear, index, 1);
-        const key = `${d.getFullYear()}-${d.getMonth()}`;
-        return {
-          label: d.toLocaleString("en-US", { month: "short", year: "numeric" }),
-          amount: Number(monthlyTotalsMap[key] || 0),
-          monthIndex: d.getMonth(),
-          year: d.getFullYear(),
-          isSelectedMonth:
-            d.getMonth() === selectedMonth && d.getFullYear() === selectedYear
-        };
-      });
-      setTwelveMonthChartData(monthSeries);
+      setRangeExpenses(allRows);
     } catch (err) {
-      console.log("Report error:", err);
-      setMonthlyTotal(0);
-      setLastMonthTotal(0);
-      setLastMonthLabel("No data");
-      setTransactions(0);
-      setTopCategory("None");
-      setDailyChartData([]);
-      setCategoryChartData([]);
-      setTwelveMonthChartData([]);
+      console.log("Report load error:", err);
+      setRangeExpenses([]);
+    } finally {
+      setRangeLoading(false);
     }
   };
+
+  useEffect(() => {
+    loadRangeExpenses();
+  }, [selectedContext.year]);
+
+  useEffect(() => {
+    const reloadOnFocus = () => loadRangeExpenses();
+    window.addEventListener("focus", reloadOnFocus);
+    return () => window.removeEventListener("focus", reloadOnFocus);
+  }, [selectedContext.year]);
+
+  const monthExpenses = useMemo(() => {
+    return rangeExpenses.filter((expense) => {
+      const d = new Date(expense.date || expense.createdAt);
+      if (!isValidDate(d)) return false;
+      return d.getMonth() === selectedContext.month && d.getFullYear() === selectedContext.year;
+    });
+  }, [rangeExpenses, selectedContext.month, selectedContext.year]);
+
+  const yearExpenses = useMemo(() => {
+    return rangeExpenses.filter((expense) => {
+      const d = new Date(expense.date || expense.createdAt);
+      if (!isValidDate(d)) return false;
+      return d.getFullYear() === selectedContext.year;
+    });
+  }, [rangeExpenses, selectedContext.year]);
+
+  const selectedDayExpenses = useMemo(() => {
+    if (!filterDate) return [];
+    const key = dayKey(filterDate);
+    return rangeExpenses.filter((expense) => {
+      const d = new Date(expense.date || expense.createdAt);
+      if (!isValidDate(d)) return false;
+      return dayKey(d) === key;
+    });
+  }, [filterDate, rangeExpenses]);
+
+  const weeklyWindow = useMemo(() => {
+    const base = filterDate
+      ? new Date(filterDate)
+      : new Date(selectedContext.year, selectedContext.month, 1);
+    const anchor = toStartOfDay(base);
+    const weekStart = new Date(anchor);
+    weekStart.setDate(anchor.getDate() - anchor.getDay());
+    const weekEnd = new Date(weekStart);
+    weekEnd.setDate(weekStart.getDate() + 7);
+    return { weekStart, weekEnd };
+  }, [filterDate, selectedContext.month, selectedContext.year]);
+
+  const weeklyExpenses = useMemo(() => {
+    const { weekStart, weekEnd } = weeklyWindow;
+    return rangeExpenses.filter((expense) => {
+      const d = new Date(expense.date || expense.createdAt);
+      if (!isValidDate(d)) return false;
+      const t = d.getTime();
+      return t >= weekStart.getTime() && t < weekEnd.getTime();
+    });
+  }, [rangeExpenses, weeklyWindow]);
+
+  const monthlyTotal = useMemo(
+    () => monthExpenses.reduce((sum, e) => sum + Number(e.amount || 0), 0),
+    [monthExpenses]
+  );
+
+  const transactions = useMemo(() => monthExpenses.length, [monthExpenses]);
+
+  const lastMonthSummary = useMemo(() => {
+    const selectedMonth = selectedContext.month;
+    const selectedYear = selectedContext.year;
+    for (let offset = 1; offset <= 12; offset += 1) {
+      const d = new Date(selectedYear, selectedMonth - offset, 1);
+      const rows = rangeExpenses.filter((expense) => {
+        const ed = new Date(expense.date || expense.createdAt);
+        if (!isValidDate(ed)) return false;
+        return ed.getMonth() === d.getMonth() && ed.getFullYear() === d.getFullYear();
+      });
+      if (rows.length) {
+        const total = rows.reduce((sum, e) => sum + Number(e.amount || 0), 0);
+        return { label: getMonthName(d.getMonth(), d.getFullYear()), total };
+      }
+    }
+    return { label: "No data", total: 0 };
+  }, [rangeExpenses, selectedContext.month, selectedContext.year]);
+
+  const categoryScopeExpenses = useMemo(() => {
+    if (timeFilter === "daily") return selectedDayExpenses;
+    if (timeFilter === "weekly") return weeklyExpenses;
+    if (timeFilter === "yearly") return yearExpenses;
+    return monthExpenses;
+  }, [monthExpenses, selectedDayExpenses, timeFilter, weeklyExpenses, yearExpenses]);
+
+  const categoryChartData = useMemo(() => {
+    const categoryMap = {};
+    categoryScopeExpenses.forEach((expense) => {
+      const cat = expense.category || "Others";
+      categoryMap[cat] = (categoryMap[cat] || 0) + Number(expense.amount || 0);
+    });
+    return Object.keys(categoryMap).map((name) => ({ name, value: categoryMap[name] }));
+  }, [categoryScopeExpenses]);
+
+  const topCategory = useMemo(() => {
+    let maxName = "None";
+    let maxValue = 0;
+    categoryChartData.forEach((entry) => {
+      if (entry.value > maxValue) {
+        maxValue = entry.value;
+        maxName = entry.name;
+      }
+    });
+    return maxName;
+  }, [categoryChartData]);
+
+  const weeklyChartData = useMemo(() => {
+    const labels = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    const sums = {};
+    weeklyExpenses.forEach((expense) => {
+      const d = new Date(expense.date || expense.createdAt);
+      if (!isValidDate(d)) return;
+      const k = dayKey(d);
+      sums[k] = (sums[k] || 0) + Number(expense.amount || 0);
+    });
+    return Array.from({ length: 7 }, (_, idx) => {
+      const dd = new Date(weeklyWindow.weekStart);
+      dd.setDate(weeklyWindow.weekStart.getDate() + idx);
+      const k = dayKey(dd);
+      return { day: labels[idx], amount: Number(sums[k] || 0), dateValue: dd };
+    });
+  }, [weeklyExpenses, weeklyWindow.weekStart]);
+
+  const dailyTotalsChartData = useMemo(() => {
+    const daysInMonth = new Date(selectedContext.year, selectedContext.month + 1, 0).getDate();
+    const sums = {};
+    monthExpenses.forEach((expense) => {
+      const d = new Date(expense.date || expense.createdAt);
+      if (!isValidDate(d)) return;
+      const day = d.getDate();
+      sums[day] = (sums[day] || 0) + Number(expense.amount || 0);
+    });
+
+    return Array.from({ length: daysInMonth }, (_, idx) => {
+      const day = idx + 1;
+      return {
+        day,
+        amount: Number(sums[day] || 0),
+        dateValue: new Date(selectedContext.year, selectedContext.month, day)
+      };
+    });
+  }, [monthExpenses, selectedContext.month, selectedContext.year]);
+
+  const selectedDayForMonthView = useMemo(() => {
+    if (!filterDate) return null;
+    const d = new Date(filterDate);
+    if (!isValidDate(d)) return null;
+    if (d.getMonth() !== selectedContext.month || d.getFullYear() !== selectedContext.year) return null;
+    return d.getDate();
+  }, [filterDate, selectedContext.month, selectedContext.year]);
+
+  const monthlyScatterData = useMemo(() => {
+    return monthExpenses.map((expense, index) => {
+      const d = new Date(expense.date || expense.createdAt);
+      return {
+        id: expense._id || `${index}`,
+        day: d.getDate(),
+        amount: Number(expense.amount || 0),
+        category: expense.category || "Others",
+        categoryKey: normalizeCategory(expense.category),
+        dateValue: d,
+        raw: expense
+      };
+    });
+  }, [monthExpenses]);
+
+  const availableScatterCategories = useMemo(() => {
+    const map = new Map(); // key -> display label (first seen)
+    monthlyScatterData.forEach((row) => {
+      if (!map.has(row.categoryKey)) map.set(row.categoryKey, row.category || "Others");
+    });
+    return Array.from(map.entries()).map(([key, label]) => ({
+      key,
+      label,
+      color: getCategoryColor(label)
+    }));
+  }, [monthlyScatterData]);
+
+  const filteredMonthlyScatterData = useMemo(() => {
+    if (!scatterCategoryFilters.length) return monthlyScatterData;
+    const allowed = new Set(scatterCategoryFilters);
+    return monthlyScatterData.filter((row) => allowed.has(row.categoryKey));
+  }, [monthlyScatterData, scatterCategoryFilters]);
+
+  const dailyTimeScatterData = useMemo(() => {
+    if (!filterDate) return [];
+    const key = dayKey(filterDate);
+    return rangeExpenses
+      .filter((expense) => {
+        const d = new Date(expense.date || expense.createdAt);
+        if (!isValidDate(d)) return false;
+        return dayKey(d) === key;
+      })
+      .map((expense, index) => {
+        const expenseDate = new Date(expense.date || expense.createdAt);
+        const created = expense.createdAt ? new Date(expense.createdAt) : expenseDate;
+        const timeSource = isValidDate(created) ? created : expenseDate;
+        return {
+          id: expense._id || `${index}`,
+          minutes: minutesSinceMidnight(timeSource),
+          amount: Number(expense.amount || 0),
+          category: expense.category || "Others",
+          dateValue: expenseDate,
+          isNew: isValidDate(created) && created.getTime() > initialLoadedAtRef.current,
+          raw: expense
+        };
+      });
+  }, [filterDate, rangeExpenses]);
+
+  const twelveMonthChartData = useMemo(() => {
+    const totals = {};
+    yearExpenses.forEach((expense) => {
+      const d = new Date(expense.date || expense.createdAt);
+      if (!isValidDate(d)) return;
+      const key = `${d.getFullYear()}-${d.getMonth()}`;
+      totals[key] = (totals[key] || 0) + Number(expense.amount || 0);
+    });
+
+    return Array.from({ length: 12 }, (_, index) => {
+      const d = new Date(selectedContext.year, index, 1);
+      const key = `${d.getFullYear()}-${d.getMonth()}`;
+      return {
+        label: d.toLocaleString("en-US", { month: "short", year: "numeric" }),
+        amount: Number(totals[key] || 0),
+        isSelectedMonth: d.getMonth() === selectedContext.month
+      };
+    });
+  }, [selectedContext.month, selectedContext.year, yearExpenses]);
+
+  const selectedMonthLabelForView = useMemo(
+    () => twelveMonthChartData.find((m) => m.isSelectedMonth)?.label || null,
+    [twelveMonthChartData]
+  );
+
+  const diff = monthlyTotal - lastMonthSummary.total;
+  const percentChange =
+    lastMonthSummary.total > 0 ? ((diff / lastMonthSummary.total) * 100).toFixed(1) : "0.0";
 
   const resetFilters = () => {
     setFilterMonth("");
     setFilterYear("");
     setFilterDate(null);
   };
-
-  const diff = monthlyTotal - lastMonthTotal;
-  const percentChange =
-    lastMonthTotal > 0 ? ((diff / lastMonthTotal) * 100).toFixed(1) : "0.0";
-  const selectedDayForView =
-    dailyChartData.find((item) => item.isSelected)?.day || null;
-  const selectedMonthLabelForView =
-    twelveMonthChartData.find((item) => item.isSelectedMonth)?.label || null;
 
   return (
     <div className="dashboard-container">
@@ -263,6 +459,23 @@ export default function Reports() {
         <Navbar setMobileOpen={setMobileOpen} />
 
         <h1 className="page-title">Reports & Analytics</h1>
+
+        <div className="report-time-filters">
+          {TIME_FILTERS.map((f) => (
+            <button
+              key={f.key}
+              type="button"
+              className={`time-filter-btn ${timeFilter === f.key ? "active" : ""}`}
+              onClick={() => {
+                setTimeFilter(f.key);
+                setClickedMonthlyExpense(null);
+                setClickedDailyExpense(null);
+              }}
+            >
+              {f.label}
+            </button>
+          ))}
+        </div>
 
         <div className="report-filters">
           <select
@@ -301,7 +514,7 @@ export default function Reports() {
               setFilterMonth("");
               setFilterYear("");
             }}
-            dateFormat="dd/MM/yyyy"
+            dateFormat="MM/dd/yyyy"
             placeholderText="Select date"
             showMonthDropdown
             showYearDropdown
@@ -314,9 +527,7 @@ export default function Reports() {
             isClearable
             className="date-picker-input"
             calendarClassName="modern-calendar"
-            dayClassName={(day) =>
-              hasExpenseOnDate(day) ? "expense-day-highlight" : undefined
-            }
+            dayClassName={(day) => (hasExpenseOnDate(day) ? "expense-day-highlight" : undefined)}
           />
           <button onClick={resetFilters}>Reset</button>
         </div>
@@ -328,8 +539,8 @@ export default function Reports() {
           </div>
 
           <div className="report-card">
-            <h3>Compared With ({lastMonthLabel})</h3>
-            <h2>{money(lastMonthTotal)}</h2>
+            <h3>Compared With ({lastMonthSummary.label})</h3>
+            <h2>{money(lastMonthSummary.total)}</h2>
           </div>
 
           <div className="report-card">
@@ -351,282 +562,371 @@ export default function Reports() {
         </div>
 
         <div className="charts-container report-chart-grid">
-          <div className="report-chart-card report-chart-card--wide">
-            <div className="report-chart-header">
-              <h3>Daily Expenses</h3>
-              <div className="chart-mode-buttons">
-                {DAILY_GRAPH_MODES.map((mode) => (
-                  <button
-                    key={mode}
-                    type="button"
-                    className={`chart-mode-btn ${
-                      dailyGraphMode === mode ? "active" : ""
-                    }`}
-                    onClick={() => setDailyGraphMode(mode)}
-                  >
-                    {mode === "both"
-                      ? "Both"
-                      : mode.charAt(0).toUpperCase() + mode.slice(1)}
-                  </button>
-                ))}
+          {(timeFilter === "weekly") && (
+            <div className="report-chart-card report-chart-card--wide">
+              <div className="report-chart-header">
+                <h3>Weekly Trend</h3>
+                <div className="chart-mode-buttons">
+                  {CHART_MODES.map((mode) => (
+                    <button
+                      key={mode}
+                      type="button"
+                      className={`chart-mode-btn ${trendMode === mode ? "active" : ""}`}
+                      onClick={() => setTrendMode(mode)}
+                    >
+                      {mode === "both" ? "Both" : mode.charAt(0).toUpperCase() + mode.slice(1)}
+                    </button>
+                  ))}
+                </div>
               </div>
+
+              {rangeLoading ? (
+                <p className="chart-note">Loading...</p>
+              ) : (
+                <>
+                  <p className="chart-note">7 days shown. Days with no expense stay at 0.</p>
+                  <ResponsiveContainer width="100%" height={350}>
+                    <ComposedChart data={weeklyChartData} margin={{ top: 20, right: 20, left: 0, bottom: 5 }}>
+                      <CartesianGrid stroke="rgba(255,255,255,0.08)" strokeDasharray="3 3" />
+                      <XAxis dataKey="day" interval={0} tick={{ fill: "#fafcff", fontSize: 12 }} axisLine={false} tickLine={false} />
+                      <YAxis tick={{ fill: "#fefeff", fontSize: 12 }} axisLine={false} tickLine={false} />
+                      <Tooltip formatter={(value) => money(value)} contentStyle={{ background: "#0f172a", border: "none", borderRadius: "10px", color: "#fff" }} />
+                      <Legend />
+                      {(trendMode === "bar" || trendMode === "both") && (
+                        <Bar dataKey="amount" name="Weekly Total (Bar)" radius={[6, 6, 0, 0]} animationDuration={800} fill="#38bdf8" />
+                      )}
+                      {(trendMode === "line" || trendMode === "both") && (
+                        <Line type="monotone" dataKey="amount" name="Weekly Total (Line)" stroke="#22d3ee" strokeWidth={3} animationDuration={900} />
+                      )}
+                    </ComposedChart>
+                  </ResponsiveContainer>
+                </>
+              )}
             </div>
+          )}
 
-            {filterDate && (
-              <p className="chart-note">
-                Showing monthly data for {currentMonthLabel}. Selected date{" "}
-                {filterDate.toLocaleDateString("en-GB")} is highlighted.
-              </p>
-            )}
+          {(timeFilter === "all" || timeFilter === "monthly") && (
+            <div className="report-chart-card report-chart-card--third">
+              <div className="report-chart-header">
+                <h3>Daily Expenses ({currentMonthLabel})</h3>
+                <div className="chart-mode-buttons">
+                  {CHART_MODES.map((mode) => (
+                    <button
+                      key={mode}
+                      type="button"
+                      className={`chart-mode-btn ${dailyMode === mode ? "active" : ""}`}
+                      onClick={() => setDailyMode(mode)}
+                    >
+                      {mode === "both" ? "Both" : mode.charAt(0).toUpperCase() + mode.slice(1)}
+                    </button>
+                  ))}
+                </div>
+              </div>
 
-            <ResponsiveContainer width="100%" height={350}>
-              <ComposedChart
-                data={dailyChartData}
-                margin={{ top: 20, right: 20, left: 0, bottom: 5 }}
-              >
-                <CartesianGrid
-                  stroke="rgba(255,255,255,0.08)"
-                  strokeDasharray="3 3"
-                />
-                <XAxis
-                  dataKey="day"
-                  interval={0}
-                  tick={{ fill: "#fafcff", fontSize: 11 }}
-                  axisLine={false}
-                  tickLine={false}
-                />
-                <YAxis
-                  tick={{ fill: "#fefeff", fontSize: 12 }}
-                  axisLine={false}
-                  tickLine={false}
-                />
-                <Tooltip
-                  formatter={(value) => money(value)}
-                  labelFormatter={(value) => `Day ${value}`}
-                  contentStyle={{
-                    background: "#0f172a",
-                    border: "none",
-                    borderRadius: "10px",
-                    color: "#fff"
-                  }}
-                />
-                <Legend />
-
-                {selectedDayForView && (
-                  <ReferenceLine
-                    x={selectedDayForView}
-                    stroke="#facc15"
-                    strokeDasharray="4 4"
-                  />
-                )}
-
-                {(dailyGraphMode === "bar" || dailyGraphMode === "both") && (
-                  <Bar
-                    dataKey="amount"
-                    name="Daily Total (Bar)"
-                    radius={[6, 6, 0, 0]}
-                    animationDuration={800}
-                  >
-                    {dailyChartData.map((entry, index) => (
-                      <Cell
-                        key={`daily-bar-${entry.day}-${index}`}
-                        fill={entry.isSelected ? "#facc15" : "#38bdf8"}
+              {rangeLoading ? (
+                <p className="chart-note">Loading...</p>
+              ) : (
+                <>
+                  <p className="chart-note">All days of the month are shown. Days with no expense stay at 0.</p>
+                  <ResponsiveContainer width="100%" height={350}>
+                    <ComposedChart data={dailyTotalsChartData} margin={{ top: 20, right: 20, left: 0, bottom: 5 }}>
+                      <CartesianGrid stroke="rgba(255,255,255,0.08)" strokeDasharray="3 3" />
+                      <XAxis
+                        dataKey="day"
+                        interval={0}
+                        tick={{ fill: "#fafcff", fontSize: 9 }}
+                        axisLine={false}
+                        tickLine={false}
                       />
-                    ))}
-                  </Bar>
-                )}
-
-                {(dailyGraphMode === "line" || dailyGraphMode === "both") && (
-                  <Line
-                    type="monotone"
-                    dataKey="amount"
-                    name="Daily Total (Line)"
-                    stroke="#22d3ee"
-                    strokeWidth={3}
-                    animationDuration={900}
-                    dot={({ cx, cy, payload }) => (
-                      <circle
-                        cx={cx}
-                        cy={cy}
-                        r={payload?.isSelected ? 6 : 4}
-                        fill={payload?.isSelected ? "#facc15" : "#22d3ee"}
-                        stroke={payload?.isSelected ? "#fff" : "#0f172a"}
-                        strokeWidth={payload?.isSelected ? 2 : 1}
+                      <YAxis tick={{ fill: "#fefeff", fontSize: 12 }} axisLine={false} tickLine={false} />
+                      <Tooltip
+                        formatter={(value) => money(value)}
+                        labelFormatter={(label) => {
+                          const day = Number(label);
+                          if (!Number.isFinite(day)) return String(label);
+                          const d = new Date(selectedContext.year, selectedContext.month, day);
+                          return formatDateMMDDYYYY(d);
+                        }}
+                        contentStyle={{ background: "#0f172a", border: "none", borderRadius: "10px", color: "#fff" }}
                       />
-                    )}
-                    activeDot={{
-                      r: 6,
-                      fill: "#facc15",
-                      stroke: "#fff",
-                      strokeWidth: 2
-                    }}
-                  />
-                )}
-              </ComposedChart>
-            </ResponsiveContainer>
-          </div>
+                      <Legend />
+                      {selectedDayForMonthView && (
+                        <ReferenceLine x={selectedDayForMonthView} stroke="#facc15" strokeDasharray="4 4" />
+                      )}
+                      {(dailyMode === "bar" || dailyMode === "both") && (
+                        <Bar dataKey="amount" name="Daily Total (Bar)" radius={[6, 6, 0, 0]} animationDuration={800} fill="#38bdf8" />
+                      )}
+                      {(dailyMode === "line" || dailyMode === "both") && (
+                        <Line type="monotone" dataKey="amount" name="Daily Total (Line)" stroke="#ee22eb" strokeWidth={3} animationDuration={900} />
+                      )}
+                    </ComposedChart>
+                  </ResponsiveContainer>
+                </>
+              )}
+            </div>
+          )}
 
-          <div className="report-chart-card report-chart-card--narrow">
+          {(!TEMP_DISABLE_MONTHLY_SCATTER && (timeFilter === "all" || timeFilter === "monthly")) && (
+            <div className="report-chart-card report-chart-card--wide">
+              <div className="report-chart-header">
+                <h3>Monthly Expense Scatter</h3>
+              </div>
+
+              {rangeLoading ? (
+                <p className="chart-note">Loading...</p>
+              ) : (
+                <>
+                  <div className="category-filter-row">
+                    <button
+                      type="button"
+                      className={`category-filter-btn ${scatterCategoryFilters.length === 0 ? "active" : ""}`}
+                      onClick={() => {
+                        setScatterCategoryFilters([]);
+                        setClickedMonthlyExpense(null);
+                      }}
+                      title="Show all categories"
+                    >
+                      All
+                    </button>
+                    {availableScatterCategories.map((c) => {
+                      const isActive = scatterCategoryFilters.includes(c.key);
+                      return (
+                        <button
+                          key={c.key}
+                          type="button"
+                          className={`category-filter-btn ${isActive ? "active" : ""}`}
+                          onClick={() => {
+                            setClickedMonthlyExpense(null);
+                            setScatterCategoryFilters((prev) => {
+                              const next = new Set(prev);
+                              if (next.has(c.key)) next.delete(c.key);
+                              else next.add(c.key);
+                              return Array.from(next);
+                            });
+                          }}
+                          title={`Toggle ${c.label}`}
+                        >
+                          <span className="category-color-dot" style={{ background: c.color }} />
+                          {c.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  <p className="chart-note">Each dot is an expense. Click a dot to view details. Use the buttons above to select multiple types.</p>
+                  {clickedMonthlyExpense && (
+                    <div className="chart-click-tooltip">
+                      <div><strong>Amount:</strong> {money(clickedMonthlyExpense.amount)}</div>
+                      <div><strong>Category:</strong> {clickedMonthlyExpense.category}</div>
+                      <div><strong>Date:</strong> {formatDateMMDDYYYY(clickedMonthlyExpense.dateValue)}</div>
+                    </div>
+                  )}
+
+                  {filteredMonthlyScatterData.length === 0 ? (
+                    <p className="chart-note">No expenses for the selected types in this month.</p>
+                  ) : (
+                    <ResponsiveContainer width="100%" height={350}>
+                      <ScatterChart margin={{ top: 20, right: 20, left: 0, bottom: 5 }}>
+                        <CartesianGrid stroke="rgba(255,255,255,0.08)" strokeDasharray="3 3" />
+                        <XAxis
+                          type="number"
+                          dataKey="day"
+                          domain={[1, new Date(selectedContext.year, selectedContext.month + 1, 0).getDate()]}
+                          ticks={Array.from({ length: new Date(selectedContext.year, selectedContext.month + 1, 0).getDate() }, (_, i) => i + 1)}
+                          interval={0}
+                          tick={{ fill: "#fafcff", fontSize: 9 }}
+                          axisLine={false}
+                          tickLine={false}
+                        />
+                        <YAxis type="number" dataKey="amount" tick={{ fill: "#fefeff", fontSize: 12 }} axisLine={false} tickLine={false} />
+                        <Tooltip content={() => null} />
+                        <Scatter
+                          name="Expenses"
+                          data={filteredMonthlyScatterData}
+                          shape={(props) => {
+                            const { cx, cy, payload } = props;
+                            const fill = getCategoryColor(payload.category);
+                            const stroke = payload?.raw?._id === clickedMonthlyExpense?.raw?._id ? "#ffffff" : "#0f172a";
+                            return (
+                              <circle
+                                cx={cx}
+                                cy={cy}
+                                r={5}
+                                fill={fill}
+                                stroke={stroke}
+                                strokeWidth={2}
+                                style={{ cursor: "pointer" }}
+                                onClick={() => setClickedMonthlyExpense(payload)}
+                              />
+                            );
+                          }}
+                        />
+                      </ScatterChart>
+                    </ResponsiveContainer>
+                  )}
+                </>
+              )}
+            </div>
+          )}
+
+          {(timeFilter === "all" || timeFilter === "daily") && (
+            <div className="report-chart-card report-chart-card--third">
+              <div className="report-chart-header">
+                <h3>Daily Spending Distribution</h3>
+              </div>
+
+              {!filterDate ? (
+                <p className="chart-note">Pick a date to see time-of-day spending distribution.</p>
+              ) : (
+                <>
+                  <p className="chart-note">{formatDateMMDDYYYY(filterDate)}. X-axis is time of day. Newly added expenses are lighter.</p>
+                  {clickedDailyExpense && (
+                    <div className="chart-click-tooltip">
+                      <div><strong>Amount:</strong> {money(clickedDailyExpense.amount)}</div>
+                      <div><strong>Category:</strong> {clickedDailyExpense.category}</div>
+                      <div><strong>Date:</strong> {formatDateMMDDYYYY(clickedDailyExpense.dateValue)}</div>
+                    </div>
+                  )}
+                  <ResponsiveContainer width="100%" height={340}>
+                    <ScatterChart margin={{ top: 20, right: 20, left: 0, bottom: 5 }}>
+                      <CartesianGrid stroke="rgba(255,255,255,0.08)" strokeDasharray="3 3" />
+                      <XAxis
+                        type="number"
+                        dataKey="minutes"
+                        domain={[0, 1439]}
+                        ticks={[0, 180, 360, 540, 720, 900, 1080, 1260, 1439]}
+                        tickFormatter={formatTimeFromMinutes}
+                        interval={0}
+                        tick={{ fill: "#fafcff", fontSize: 11 }}
+                        axisLine={false}
+                        tickLine={false}
+                      />
+                      <YAxis type="number" dataKey="amount" tick={{ fill: "#fefeff", fontSize: 12 }} axisLine={false} tickLine={false} />
+                      <Tooltip content={() => null} />
+                      <Scatter
+                        name="Expenses"
+                        data={dailyTimeScatterData}
+                        shape={(props) => {
+                          const { cx, cy, payload } = props;
+                          const fill = payload.isNew ? "rgba(34,211,238,0.35)" : "#22ee47";
+                          const stroke = payload?.raw?._id === clickedDailyExpense?.raw?._id ? "#ffffff" : "#0f172a";
+                          return (
+                            <circle
+                              cx={cx}
+                              cy={cy}
+                              r={5}
+                              fill={fill}
+                              stroke={stroke}
+                              strokeWidth={2}
+                              style={{ cursor: "pointer" }}
+                              onClick={() => setClickedDailyExpense(payload)}
+                            />
+                          );
+                        }}
+                      />
+                    </ScatterChart>
+                  </ResponsiveContainer>
+                </>
+              )}
+            </div>
+          )}
+
+          <div className="report-chart-card report-chart-card--third">
             <h3>Category Breakdown</h3>
             <ResponsiveContainer width="100%" height={isCompactPie ? 360 : 420}>
               <PieChart>
                 <Pie
                   data={categoryChartData}
-                  cx={isCompactPie ? "50%" : "42%"}
-                  cy={isCompactPie ? "44%" : "50%"}
+                  cx={"50%" }
+                  cy={"50%" }
                   innerRadius={isCompactPie ? "28%" : "34%"}
                   outerRadius={isCompactPie ? "45%" : "62%"}
                   dataKey="value"
                   paddingAngle={3}
                   labelLine={!isCompactPie}
-                  label={({ percent }) =>
-                    percent > 0.07 ? `${(percent * 100).toFixed(0)}%` : ""
-                  }
+                  label={({ percent }) => (percent > 0.07 ? `${(percent * 100).toFixed(0)}%` : "")}
                 >
                   {categoryChartData.map((entry, index) => (
-                    <Cell key={index} fill={COLORS[index % COLORS.length]} />
+                    <Cell key={index} fill={PIE_COLORS[index % PIE_COLORS.length]} />
                   ))}
-
                   <Label
-                    value={money(monthlyTotal)}
+                    value={money(categoryScopeExpenses.reduce((sum, e) => sum + Number(e.amount || 0), 0))}
                     position="center"
-                    style={{
-                      fontSize: "20px",
-                      fontWeight: "700",
-                      fill: "#fdfdfd"
-                    }}
+                    style={{ fontSize: "20px", fontWeight: "700", fill: "#fdfdfd", textAnchor: "middle", textAlign: "center" }}
                   />
                 </Pie>
-                <Tooltip
-                  formatter={(value) => money(value)}
-                  contentStyle={{
-                    background: "#0f172a",
-                    border: "none",
-                    borderRadius: "10px",
-                    color: "#fff"
-                  }}
-                />
+                <Tooltip formatter={(value) => money(value)} contentStyle={{ background: "#0f172a", border: "none", borderRadius: "10px", color: "#fff" }} />
                 <Legend
                   layout={isCompactPie ? "horizontal" : "vertical"}
                   align={isCompactPie ? "center" : "right"}
                   verticalAlign={isCompactPie ? "bottom" : "middle"}
-                  wrapperStyle={{
-                    paddingLeft: isCompactPie ? "0px" : "10px",
-                    fontSize: "13px"
-                  }}
+                  wrapperStyle={{ paddingLeft: isCompactPie ? "0px" : "10px", fontSize: "13px" }}
                 />
               </PieChart>
             </ResponsiveContainer>
           </div>
 
-          <div className="report-chart-card report-chart-card--full">
-            <div className="report-chart-header">
-              <h3>Last 12 Months Trend</h3>
-              <div className="chart-mode-buttons">
-                {MONTH_GRAPH_MODES.map((mode) => (
-                  <button
-                    key={mode}
-                    type="button"
-                    className={`chart-mode-btn ${
-                      monthGraphMode === mode ? "active" : ""
-                    }`}
-                    onClick={() => setMonthGraphMode(mode)}
-                  >
-                    {mode === "both"
-                      ? "Both"
-                      : mode.charAt(0).toUpperCase() + mode.slice(1)}
-                  </button>
-                ))}
+          {(!TEMP_DISABLE_TWELVE_MONTH_TREND && (timeFilter === "all" || timeFilter === "yearly")) && (
+            <div className="report-chart-card report-chart-card--full">
+              <div className="report-chart-header">
+                <h3>12 Months Trend (Selected Year)</h3>
+                <div className="chart-mode-buttons">
+                  {CHART_MODES.map((mode) => (
+                    <button
+                      key={mode}
+                      type="button"
+                      className={`chart-mode-btn ${monthMode === mode ? "active" : ""}`}
+                      onClick={() => setMonthMode(mode)}
+                    >
+                      {mode === "both" ? "Both" : mode.charAt(0).toUpperCase() + mode.slice(1)}
+                    </button>
+                  ))}
+                </div>
               </div>
+
+              <p className="chart-note">Jan to Dec of selected year are shown. Months with no expense stay at 0.</p>
+
+              <ResponsiveContainer width="100%" height={340}>
+                <ComposedChart data={twelveMonthChartData} margin={{ top: 20, right: 20, left: 0, bottom: 30 }}>
+                  <CartesianGrid stroke="rgba(255,255,255,0.08)" strokeDasharray="3 3" />
+                  <XAxis dataKey="label" interval={0} angle={-17} height={56} textAnchor="end" tick={{ fill: "#fafcff", fontSize: 9 }} axisLine={false} tickLine={false} />
+                  <YAxis tick={{ fill: "#fefeff", fontSize: 12 }} axisLine={false} tickLine={false} />
+                  <Tooltip formatter={(value) => money(value)} labelFormatter={(value) => value} contentStyle={{ background: "#0f172a", border: "none", borderRadius: "10px", color: "#fff" }} />
+                  <Legend />
+                  {selectedMonthLabelForView && <ReferenceLine x={selectedMonthLabelForView} stroke="#facc15" strokeDasharray="4 4" />}
+
+                  {(monthMode === "bar" || monthMode === "both") && (
+                    <Bar dataKey="amount" name="Monthly Total (Bar)" radius={[6, 6, 0, 0]}>
+                      {twelveMonthChartData.map((entry, index) => (
+                        <Cell key={`month-bar-${entry.label}-${index}`} fill={entry.isSelectedMonth ? "#facc15" : "#4ade80"} />
+                      ))}
+                    </Bar>
+                  )}
+
+                  {(monthMode === "line" || monthMode === "both") && (
+                    <Line
+                      type="monotone"
+                      dataKey="amount"
+                      name="Monthly Total (Line)"
+                      stroke="#22d3ee"
+                      strokeWidth={3}
+                      dot={({ cx, cy, payload }) => (
+                        <circle
+                          cx={cx}
+                          cy={cy}
+                          r={payload?.isSelectedMonth ? 6 : 4}
+                          fill={payload?.isSelectedMonth ? "#facc15" : "#22d3ee"}
+                          stroke={payload?.isSelectedMonth ? "#fff" : "#0f172a"}
+                          strokeWidth={payload?.isSelectedMonth ? 2 : 1}
+                        />
+                      )}
+                      activeDot={{ r: 6, fill: "#facc15", stroke: "#fff", strokeWidth: 2 }}
+                    />
+                  )}
+                </ComposedChart>
+              </ResponsiveContainer>
             </div>
-
-            <p className="chart-note">
-              Jan to Dec of selected year are shown. Months with no expense stay at 0.
-            </p>
-
-            <ResponsiveContainer width="100%" height={340}>
-              <ComposedChart
-                data={twelveMonthChartData}
-                margin={{ top: 20, right: 20, left: 0, bottom: 30 }}
-              >
-                <CartesianGrid
-                  stroke="rgba(255,255,255,0.08)"
-                  strokeDasharray="3 3"
-                />
-                <XAxis
-                  dataKey="label"
-                  interval={0}
-                  angle={-17}
-                  height={56}
-                  textAnchor="end"
-                  tick={{ fill: "#fafcff", fontSize: 9 }}
-                  axisLine={false}
-                  tickLine={false}
-                />
-                <YAxis
-                  tick={{ fill: "#fefeff", fontSize: 12 }}
-                  axisLine={false}
-                  tickLine={false}
-                />
-                <Tooltip
-                  formatter={(value) => money(value)}
-                  labelFormatter={(value) => value}
-                  contentStyle={{
-                    background: "#0f172a",
-                    border: "none",
-                    borderRadius: "10px",
-                    color: "#fff"
-                  }}
-                />
-                <Legend />
-
-                {selectedMonthLabelForView && (
-                  <ReferenceLine
-                    x={selectedMonthLabelForView}
-                    stroke="#facc15"
-                    strokeDasharray="4 4"
-                  />
-                )}
-
-                {(monthGraphMode === "bar" || monthGraphMode === "both") && (
-                  <Bar dataKey="amount" name="Monthly Total (Bar)" radius={[6, 6, 0, 0]}>
-                    {twelveMonthChartData.map((entry, index) => (
-                      <Cell
-                        key={`month-bar-${entry.label}-${index}`}
-                        fill={entry.isSelectedMonth ? "#facc15" : "#4ade80"}
-                      />
-                    ))}
-                  </Bar>
-                )}
-
-                {(monthGraphMode === "line" || monthGraphMode === "both") && (
-                  <Line
-                    type="monotone"
-                    dataKey="amount"
-                    name="Monthly Total (Line)"
-                    stroke="#22d3ee"
-                    strokeWidth={3}
-                    dot={({ cx, cy, payload }) => (
-                      <circle
-                        cx={cx}
-                        cy={cy}
-                        r={payload?.isSelectedMonth ? 6 : 4}
-                        fill={payload?.isSelectedMonth ? "#facc15" : "#22d3ee"}
-                        stroke={payload?.isSelectedMonth ? "#fff" : "#0f172a"}
-                        strokeWidth={payload?.isSelectedMonth ? 2 : 1}
-                      />
-                    )}
-                    activeDot={{
-                      r: 6,
-                      fill: "#facc15",
-                      stroke: "#fff",
-                      strokeWidth: 2
-                    }}
-                  />
-                )}
-              </ComposedChart>
-            </ResponsiveContainer>
-          </div>
+          )}
         </div>
       </div>
     </div>

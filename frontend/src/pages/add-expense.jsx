@@ -160,7 +160,7 @@ export default function AddExpense() {
                 <DatePicker
                   selected={date}
                   onChange={(selectedDate) => setDate(selectedDate)}
-                  dateFormat="dd/MM/yyyy"
+                  dateFormat="MM/dd/yyyy"
                   placeholderText="Select date"
 
                   /* MODERN FEATURES */
