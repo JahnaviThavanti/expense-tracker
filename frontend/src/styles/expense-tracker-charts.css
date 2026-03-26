@@ -283,7 +283,10 @@
 }
 
 .report-chart-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
   gap: 20px;
+  width: 100%;
 }
 
 .report-chart-card {
@@ -297,11 +300,18 @@
 }
 
 .report-chart-card--wide {
-  flex: 1 1 600px;
+  grid-column: span 2;
 }
 
 .report-chart-card--third {
-  flex: 1 1 380px;
+  width: 100%;
+}
+
+/* Mobile fix */
+@media (max-width: 768px) {
+  .report-chart-card--wide {
+    grid-column: span 1;
+  }
 }
 
 .report-chart-card--narrow {

@@ -64,6 +64,21 @@ const formatDateMMDDYYYY = (dateValue) => {
   }).format(dateValue);
 };
 
+const formatDateMMDD = (dateValue) => {
+  if (!(dateValue instanceof Date) || Number.isNaN(dateValue.getTime())) return "";
+  return new Intl.DateTimeFormat("en-US", {
+    month: "2-digit",
+    day: "2-digit"
+  }).format(dateValue);
+};
+
+const getExpenseDotColor = (seed) => {
+  const s = String(seed || "expense");
+  let hash = 0;
+  for (let i = 0; i < s.length; i += 1) hash = (hash * 31 + s.charCodeAt(i)) >>> 0;
+  return `hsl(${hash % 360}, 78%, 58%)`;
+};
+
 const getMonthName = (month, year) =>
   new Date(year, month, 1).toLocaleString("en-US", {
     month: "short",
@@ -103,16 +118,6 @@ const getCategoryColor = (category) => {
 
 const normalizeCategory = (value) => String(value || "Others").trim().toLowerCase() || "others";
 
-const minutesSinceMidnight = (dateValue) =>
-  dateValue.getHours() * 60 + dateValue.getMinutes();
-
-const formatTimeFromMinutes = (value) => {
-  const total = Math.max(0, Math.min(1439, Number(value || 0)));
-  const hours = Math.floor(total / 60);
-  const minutes = total % 60;
-  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
-};
-
 export default function Reports() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [timeFilter, setTimeFilter] = useState("all");
@@ -122,7 +127,7 @@ export default function Reports() {
   const [scatterCategoryFilters, setScatterCategoryFilters] = useState([]);
 
   // Temporary UI disables (requested).
-  const TEMP_DISABLE_MONTHLY_SCATTER = true;
+  const TEMP_DISABLE_MONTHLY_SCATTER = false;
   const TEMP_DISABLE_TWELVE_MONTH_TREND = false;
 
   const [filterMonth, setFilterMonth] = useState("");
@@ -326,7 +331,12 @@ export default function Reports() {
       const dd = new Date(weeklyWindow.weekStart);
       dd.setDate(weeklyWindow.weekStart.getDate() + idx);
       const k = dayKey(dd);
-      return { day: labels[idx], amount: Number(sums[k] || 0), dateValue: dd };
+      return {
+        day: labels[idx],
+        dayLabel: formatDateMMDD(dd),
+        amount: Number(sums[k] || 0),
+        dateValue: dd
+      };
     });
   }, [weeklyExpenses, weeklyWindow.weekStart]);
 
@@ -342,10 +352,12 @@ export default function Reports() {
 
     return Array.from({ length: daysInMonth }, (_, idx) => {
       const day = idx + 1;
+      const dateValue = new Date(selectedContext.year, selectedContext.month, day);
       return {
         day,
         amount: Number(sums[day] || 0),
-        dateValue: new Date(selectedContext.year, selectedContext.month, day)
+        dateValue,
+        dateLabel: formatDateMMDD(dateValue)
       };
     });
   }, [monthExpenses, selectedContext.month, selectedContext.year]);
@@ -368,6 +380,7 @@ export default function Reports() {
         category: expense.category || "Others",
         categoryKey: normalizeCategory(expense.category),
         dateValue: d,
+        dotColor: getExpenseDotColor(expense._id || `${expense.amount}-${d.getTime()}-${index}`),
         raw: expense
       };
     });
@@ -391,30 +404,24 @@ export default function Reports() {
     return monthlyScatterData.filter((row) => allowed.has(row.categoryKey));
   }, [monthlyScatterData, scatterCategoryFilters]);
 
-  const dailyTimeScatterData = useMemo(() => {
-    if (!filterDate) return [];
-    const key = dayKey(filterDate);
-    return rangeExpenses
-      .filter((expense) => {
-        const d = new Date(expense.date || expense.createdAt);
-        if (!isValidDate(d)) return false;
-        return dayKey(d) === key;
-      })
-      .map((expense, index) => {
-        const expenseDate = new Date(expense.date || expense.createdAt);
-        const created = expense.createdAt ? new Date(expense.createdAt) : expenseDate;
-        const timeSource = isValidDate(created) ? created : expenseDate;
-        return {
-          id: expense._id || `${index}`,
-          minutes: minutesSinceMidnight(timeSource),
-          amount: Number(expense.amount || 0),
-          category: expense.category || "Others",
-          dateValue: expenseDate,
-          isNew: isValidDate(created) && created.getTime() > initialLoadedAtRef.current,
-          raw: expense
-        };
-      });
-  }, [filterDate, rangeExpenses]);
+  const dailySpendingScatterData = useMemo(() => {
+    const selectedDateKey = filterDate ? dayKey(filterDate) : null;
+    return monthExpenses.map((expense, index) => {
+      const expenseDate = new Date(expense.date || expense.createdAt);
+      const created = expense.createdAt ? new Date(expense.createdAt) : expenseDate;
+      return {
+        id: expense._id || `${index}`,
+        day: expenseDate.getDate(),
+        amount: Number(expense.amount || 0),
+        category: expense.category || "Others",
+        dateValue: expenseDate,
+        isSelectedDate: Boolean(selectedDateKey) && dayKey(expenseDate) === selectedDateKey,
+        isNew: isValidDate(created) && created.getTime() > initialLoadedAtRef.current,
+        dotColor: getExpenseDotColor(expense._id || `${expense.amount}-${expenseDate.getTime()}-${index}`),
+        raw: expense
+      };
+    });
+  }, [filterDate, monthExpenses]);
 
   const twelveMonthChartData = useMemo(() => {
     const totals = {};
@@ -515,7 +522,6 @@ export default function Reports() {
               setFilterYear("");
             }}
             dateFormat="MM/dd/yyyy"
-            placeholderText="Select date"
             showMonthDropdown
             showYearDropdown
             dropdownMode="select"
@@ -527,6 +533,7 @@ export default function Reports() {
             isClearable
             className="date-picker-input"
             calendarClassName="modern-calendar"
+            placeholderText="Select date"
             dayClassName={(day) => (hasExpenseOnDate(day) ? "expense-day-highlight" : undefined)}
           />
           <button onClick={resetFilters}>Reset</button>
@@ -562,7 +569,7 @@ export default function Reports() {
         </div>
 
         <div className="charts-container report-chart-grid">
-          {(timeFilter === "weekly") && (
+          {(timeFilter === "weekly" || timeFilter === "all") && (
             <div className="report-chart-card report-chart-card--wide">
               <div className="report-chart-header">
                 <h3>Weekly Trend</h3>
@@ -585,11 +592,16 @@ export default function Reports() {
               ) : (
                 <>
                   <p className="chart-note">7 days shown. Days with no expense stay at 0.</p>
-                  <ResponsiveContainer width="100%" height={350}>
+                  <ResponsiveContainer width="100%" height={290}>
                     <ComposedChart data={weeklyChartData} margin={{ top: 20, right: 20, left: 0, bottom: 5 }}>
                       <CartesianGrid stroke="rgba(255,255,255,0.08)" strokeDasharray="3 3" />
-                      <XAxis dataKey="day" interval={0} tick={{ fill: "#fafcff", fontSize: 12 }} axisLine={false} tickLine={false} />
-                      <YAxis tick={{ fill: "#fefeff", fontSize: 12 }} axisLine={false} tickLine={false} />
+                      <XAxis dataKey="dayLabel" interval={0} tick={{ fill: "#fafcff", fontSize: 12 }} axisLine={false} tickLine={false} />
+                      <YAxis
+                        tickFormatter={(value) => money(value)}
+                        tick={{ fill: "#fefeff", fontSize: 12 }}
+                        axisLine={false}
+                        tickLine={false}
+                      />
                       <Tooltip formatter={(value) => money(value)} contentStyle={{ background: "#0f172a", border: "none", borderRadius: "10px", color: "#fff" }} />
                       <Legend />
                       {(trendMode === "bar" || trendMode === "both") && (
@@ -599,6 +611,72 @@ export default function Reports() {
                         <Line type="monotone" dataKey="amount" name="Weekly Total (Line)" stroke="#22d3ee" strokeWidth={3} animationDuration={900} />
                       )}
                     </ComposedChart>
+                  </ResponsiveContainer>
+                </>
+              )}
+            </div>
+          )}
+
+          {(timeFilter === "weekly" || timeFilter === "all") && (
+            <div className="report-chart-card report-chart-card--third">
+              <div className="report-chart-header">
+                <h3>Weekly Expense Scatter</h3>
+              </div>
+
+              {rangeLoading ? (
+                <p className="chart-note">Loading...</p>
+              ) : (
+                <>
+                  <p className="chart-note">
+                    Each dot represents an expense in the selected week.
+                  </p>
+
+                  <ResponsiveContainer width="100%" height={300}>
+                    <ScatterChart margin={{ top: 20, right: 20, left: 0, bottom: 16 }}>
+                      <CartesianGrid stroke="rgba(255,255,255,0.08)" strokeDasharray="3 3" />
+
+                      <XAxis
+                        type="category"
+                        dataKey="day"
+                        tick={{ fill: "#fafcff", fontSize: 12 }}
+                        axisLine={false}
+                        tickLine={false}
+                      />
+
+                      <YAxis
+                        tickFormatter={(value) => money(value)}
+                        tick={{ fill: "#fefeff", fontSize: 12 }}
+                        axisLine={false}
+                        tickLine={false}
+                      />
+
+                      <Tooltip formatter={(value) => money(value)} />
+
+                      <Scatter
+                        data={weeklyExpenses.map((e, i) => {
+                          const d = new Date(e.date || e.createdAt);
+                          return {
+                            day: ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"][d.getDay()],
+                            amount: Number(e.amount || 0),
+                            dotColor: getExpenseDotColor(e._id || i),
+                            raw: e
+                          };
+                        })}
+                        shape={(props) => {
+                          const { cx, cy, payload } = props;
+                          return (
+                            <circle
+                              cx={cx}
+                              cy={cy}
+                              r={5}
+                              fill={payload.dotColor}
+                              stroke="#0f172a"
+                              strokeWidth={1.5}
+                            />
+                          );
+                        }}
+                      />
+                    </ScatterChart>
                   </ResponsiveContainer>
                 </>
               )}
@@ -628,17 +706,29 @@ export default function Reports() {
               ) : (
                 <>
                   <p className="chart-note">All days of the month are shown. Days with no expense stay at 0.</p>
-                  <ResponsiveContainer width="100%" height={350}>
-                    <ComposedChart data={dailyTotalsChartData} margin={{ top: 20, right: 20, left: 0, bottom: 5 }}>
+                  <ResponsiveContainer width="100%" height={290}>
+                    <ComposedChart data={dailyTotalsChartData} margin={{ top: 20, right: 20, left: 0, bottom: 16 }}>
                       <CartesianGrid stroke="rgba(255,255,255,0.08)" strokeDasharray="3 3" />
                       <XAxis
                         dataKey="day"
-                        interval={0}
-                        tick={{ fill: "#fafcff", fontSize: 9 }}
+                        tickFormatter={(day) =>
+                          formatDateMMDD(new Date(selectedContext.year, selectedContext.month, Number(day || 1)))
+                        }
+                        interval="preserveStartEnd"
+                        minTickGap={20}
+                        tick={{ fill: "#fafcff", fontSize: 11 }}
+                        textAnchor="end"
                         axisLine={false}
                         tickLine={false}
                       />
-                      <YAxis tick={{ fill: "#fefeff", fontSize: 12 }} axisLine={false} tickLine={false} />
+                      <YAxis
+                        type="number"
+                        dataKey="amount"
+                        tickFormatter={(value) => money(value)}
+                        tick={{ fill: "#fefeff", fontSize: 12 }}
+                        axisLine={false}
+                        tickLine={false}
+                      />
                       <Tooltip
                         formatter={(value) => money(value)}
                         labelFormatter={(label) => {
@@ -667,7 +757,7 @@ export default function Reports() {
           )}
 
           {(!TEMP_DISABLE_MONTHLY_SCATTER && (timeFilter === "all" || timeFilter === "monthly")) && (
-            <div className="report-chart-card report-chart-card--wide">
+            <div className="report-chart-card report-chart-card--third">
               <div className="report-chart-header">
                 <h3>Monthly Expense Scatter</h3>
               </div>
@@ -725,16 +815,19 @@ export default function Reports() {
                   {filteredMonthlyScatterData.length === 0 ? (
                     <p className="chart-note">No expenses for the selected types in this month.</p>
                   ) : (
-                    <ResponsiveContainer width="100%" height={350}>
-                      <ScatterChart margin={{ top: 20, right: 20, left: 0, bottom: 5 }}>
+                    <ResponsiveContainer width="100%" height={300}>
+                      <ScatterChart margin={{ top: 20, right: 20, left: 0, bottom: 16 }}>
                         <CartesianGrid stroke="rgba(255,255,255,0.08)" strokeDasharray="3 3" />
                         <XAxis
                           type="number"
                           dataKey="day"
                           domain={[1, new Date(selectedContext.year, selectedContext.month + 1, 0).getDate()]}
-                          ticks={Array.from({ length: new Date(selectedContext.year, selectedContext.month + 1, 0).getDate() }, (_, i) => i + 1)}
-                          interval={0}
-                          tick={{ fill: "#fafcff", fontSize: 9 }}
+                          tickFormatter={(day) =>
+                            formatDateMMDD(new Date(selectedContext.year, selectedContext.month, Number(day || 1)))
+                          }
+                          interval="preserveStartEnd"
+                          minTickGap={25}
+                          tick={{ fill: "#fafcff", fontSize: 11 }}
                           axisLine={false}
                           tickLine={false}
                         />
@@ -745,7 +838,7 @@ export default function Reports() {
                           data={filteredMonthlyScatterData}
                           shape={(props) => {
                             const { cx, cy, payload } = props;
-                            const fill = getCategoryColor(payload.category);
+                            const fill = payload.dotColor || getCategoryColor(payload.category);
                             const stroke = payload?.raw?._id === clickedMonthlyExpense?.raw?._id ? "#ffffff" : "#0f172a";
                             return (
                               <circle
@@ -775,11 +868,14 @@ export default function Reports() {
                 <h3>Daily Spending Distribution</h3>
               </div>
 
-              {!filterDate ? (
-                <p className="chart-note">Pick a date to see time-of-day spending distribution.</p>
+              {rangeLoading ? (
+                <p className="chart-note">Loading...</p>
               ) : (
                 <>
-                  <p className="chart-note">{formatDateMMDDYYYY(filterDate)}. X-axis is time of day. Newly added expenses are lighter.</p>
+                  <p className="chart-note">
+                    X-axis shows all dates in {currentMonthLabel}. Y-axis shows expense amount.
+                    {filterDate ? ` Selected date ${formatDateMMDDYYYY(filterDate)} is highlighted.` : ""}
+                  </p>
                   {clickedDailyExpense && (
                     <div className="chart-click-tooltip">
                       <div><strong>Amount:</strong> {money(clickedDailyExpense.amount)}</div>
@@ -787,37 +883,47 @@ export default function Reports() {
                       <div><strong>Date:</strong> {formatDateMMDDYYYY(clickedDailyExpense.dateValue)}</div>
                     </div>
                   )}
-                  <ResponsiveContainer width="100%" height={340}>
-                    <ScatterChart margin={{ top: 20, right: 20, left: 0, bottom: 5 }}>
+                  <ResponsiveContainer width="100%" height={300}>
+                    <ScatterChart margin={{ top: 20, right: 20, left: 0, bottom: 16 }}>
                       <CartesianGrid stroke="rgba(255,255,255,0.08)" strokeDasharray="3 3" />
                       <XAxis
                         type="number"
-                        dataKey="minutes"
-                        domain={[0, 1439]}
-                        ticks={[0, 180, 360, 540, 720, 900, 1080, 1260, 1439]}
-                        tickFormatter={formatTimeFromMinutes}
-                        interval={0}
+                        dataKey="day"
+                        domain={[1, new Date(selectedContext.year, selectedContext.month + 1, 0).getDate()]}
+                        tickFormatter={(day) =>
+                          formatDateMMDD(new Date(selectedContext.year, selectedContext.month, Number(day || 1)))
+                        }
+                        interval="preserveStartEnd"
+                        minTickGap={25}
                         tick={{ fill: "#fafcff", fontSize: 11 }}
                         axisLine={false}
                         tickLine={false}
                       />
                       <YAxis type="number" dataKey="amount" tick={{ fill: "#fefeff", fontSize: 12 }} axisLine={false} tickLine={false} />
                       <Tooltip content={() => null} />
+                      {selectedDayForMonthView && (
+                        <ReferenceLine x={selectedDayForMonthView} stroke="#facc15" strokeDasharray="4 4" />
+                      )}
                       <Scatter
                         name="Expenses"
-                        data={dailyTimeScatterData}
+                        data={dailySpendingScatterData}
                         shape={(props) => {
                           const { cx, cy, payload } = props;
-                          const fill = payload.isNew ? "rgba(34,211,238,0.35)" : "#22ee47";
-                          const stroke = payload?.raw?._id === clickedDailyExpense?.raw?._id ? "#ffffff" : "#0f172a";
+                          const fill = payload.dotColor || "#22ee47";
+                          const stroke = payload?.raw?._id === clickedDailyExpense?.raw?._id
+                            ? "#ffffff"
+                            : payload.isSelectedDate
+                              ? "#facc15"
+                              : "#0f172a";
                           return (
                             <circle
                               cx={cx}
                               cy={cy}
                               r={5}
                               fill={fill}
+                              opacity={payload.isNew ? 0.55 : 1}
                               stroke={stroke}
-                              strokeWidth={2}
+                              strokeWidth={payload.isSelectedDate ? 2 : 1.5}
                               style={{ cursor: "pointer" }}
                               onClick={() => setClickedDailyExpense(payload)}
                             />
@@ -833,14 +939,14 @@ export default function Reports() {
 
           <div className="report-chart-card report-chart-card--third">
             <h3>Category Breakdown</h3>
-            <ResponsiveContainer width="100%" height={isCompactPie ? 360 : 420}>
+            <ResponsiveContainer width="100%" height={isCompactPie ? 300 : 340}>
               <PieChart>
                 <Pie
                   data={categoryChartData}
                   cx={"50%" }
                   cy={"50%" }
-                  innerRadius={isCompactPie ? "28%" : "34%"}
-                  outerRadius={isCompactPie ? "45%" : "62%"}
+                  innerRadius={isCompactPie ? "26%" : "30%"}
+                  outerRadius={isCompactPie ? "42%" : "54%"}
                   dataKey="value"
                   paddingAngle={3}
                   labelLine={!isCompactPie}
@@ -867,7 +973,7 @@ export default function Reports() {
           </div>
 
           {(!TEMP_DISABLE_TWELVE_MONTH_TREND && (timeFilter === "all" || timeFilter === "yearly")) && (
-            <div className="report-chart-card report-chart-card--full">
+            <div className="report-chart-card report-chart-card--third">
               <div className="report-chart-header">
                 <h3>12 Months Trend (Selected Year)</h3>
                 <div className="chart-mode-buttons">
@@ -889,8 +995,20 @@ export default function Reports() {
               <ResponsiveContainer width="100%" height={340}>
                 <ComposedChart data={twelveMonthChartData} margin={{ top: 20, right: 20, left: 0, bottom: 30 }}>
                   <CartesianGrid stroke="rgba(255,255,255,0.08)" strokeDasharray="3 3" />
-                  <XAxis dataKey="label" interval={0} angle={-17} height={56} textAnchor="end" tick={{ fill: "#fafcff", fontSize: 9 }} axisLine={false} tickLine={false} />
-                  <YAxis tick={{ fill: "#fefeff", fontSize: 12 }} axisLine={false} tickLine={false} />
+                  <XAxis
+                    dataKey="label"
+                    interval="preserveStartEnd"
+                    minTickGap={20}
+                    tick={{ fill: "#fafcff", fontSize: 11 }}
+                    axisLine={false}
+                    tickLine={false}
+                  />
+                  <YAxis
+                    tickFormatter={(value) => money(value)}
+                    tick={{ fill: "#fefeff", fontSize: 12 }}
+                    axisLine={false}
+                    tickLine={false}
+                  />
                   <Tooltip formatter={(value) => money(value)} labelFormatter={(value) => value} contentStyle={{ background: "#0f172a", border: "none", borderRadius: "10px", color: "#fff" }} />
                   <Legend />
                   {selectedMonthLabelForView && <ReferenceLine x={selectedMonthLabelForView} stroke="#facc15" strokeDasharray="4 4" />}

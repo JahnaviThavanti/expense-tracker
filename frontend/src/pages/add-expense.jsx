@@ -155,7 +155,7 @@ export default function AddExpense() {
               </div>
 
               <div>
-                <label>Date</label>
+                <label>Date (MM/DD/YYYY)</label>
 
                 <DatePicker
                   selected={date}
