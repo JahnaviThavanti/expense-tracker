@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import API from "../utils/api";
 import Navbar from "../components/Navbar";
 import Sidebar from "../components/Sidebar";
@@ -10,9 +10,9 @@ import "react-datepicker/dist/react-datepicker.css";
 
 import {
   ComposedChart,
+  BarChart,
   Bar,
   Line,
-  ScatterChart,
   Scatter,
   XAxis,
   YAxis,
@@ -23,7 +23,6 @@ import {
   Pie,
   Cell,
   Label,
-  ReferenceLine,
   Tooltip
 } from "recharts";
 
@@ -36,6 +35,7 @@ const TIME_FILTERS = [
 ];
 
 const CHART_MODES = ["line", "bar", "both"];
+const STACK_VIEW_MODES = ["stack", "scatter", "both"];
 
 const PIE_COLORS = [
   "#6C5DD3",
@@ -64,21 +64,6 @@ const formatDateMMDDYYYY = (dateValue) => {
   }).format(dateValue);
 };
 
-const formatDateMMDD = (dateValue) => {
-  if (!(dateValue instanceof Date) || Number.isNaN(dateValue.getTime())) return "";
-  return new Intl.DateTimeFormat("en-US", {
-    month: "2-digit",
-    day: "2-digit"
-  }).format(dateValue);
-};
-
-const getExpenseDotColor = (seed) => {
-  const s = String(seed || "expense");
-  let hash = 0;
-  for (let i = 0; i < s.length; i += 1) hash = (hash * 31 + s.charCodeAt(i)) >>> 0;
-  return `hsl(${hash % 360}, 78%, 58%)`;
-};
-
 const getMonthName = (month, year) =>
   new Date(year, month, 1).toLocaleString("en-US", {
     month: "short",
@@ -99,6 +84,11 @@ const dayKey = (dateValue) => {
   return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
 };
 
+const getDayOnlyLabel = (dateValue) => {
+  if (!isValidDate(dateValue)) return "";
+  return String(dateValue.getDate()).padStart(2, "0");
+};
+
 const getCategoryColor = (category) => {
   const c = String(category || "").trim().toLowerCase();
   if (c === "food") return "#f97316";
@@ -108,7 +98,6 @@ const getCategoryColor = (category) => {
   if (c === "entertainment") return "#22c55e";
   if (c === "others" || c === "other") return "#94a3b8";
 
-  // Stable fallback color for custom categories.
   const s = c || "others";
   let hash = 0;
   for (let i = 0; i < s.length; i += 1) hash = (hash * 31 + s.charCodeAt(i)) >>> 0;
@@ -116,19 +105,17 @@ const getCategoryColor = (category) => {
   return `hsl(${hue}, 75%, 60%)`;
 };
 
-const normalizeCategory = (value) => String(value || "Others").trim().toLowerCase() || "others";
-
 export default function Reports() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [timeFilter, setTimeFilter] = useState("all");
-  const [dailyMode, setDailyMode] = useState("line");
   const [trendMode, setTrendMode] = useState("line");
   const [monthMode, setMonthMode] = useState("line");
-  const [scatterCategoryFilters, setScatterCategoryFilters] = useState([]);
+  const [monthlySummaryMode, setMonthlySummaryMode] = useState("line");
+  const [weeklyExpenseMode, setWeeklyExpenseMode] = useState("stack");
+  const [dailyExpenseMode, setDailyExpenseMode] = useState("stack");
+  const [monthlyExpenseMode, setMonthlyExpenseMode] = useState("stack");
 
-  // Temporary UI disables (requested).
-  const TEMP_DISABLE_MONTHLY_SCATTER = false;
-  const TEMP_DISABLE_TWELVE_MONTH_TREND = false;
+  const TEMP_DISABLE_TWELVE_MONTH_TREND = true;
 
   const [filterMonth, setFilterMonth] = useState("");
   const [filterYear, setFilterYear] = useState("");
@@ -140,10 +127,6 @@ export default function Reports() {
     typeof window !== "undefined" ? window.innerWidth < 1200 : false
   );
 
-  const [clickedMonthlyExpense, setClickedMonthlyExpense] = useState(null);
-  const [clickedDailyExpense, setClickedDailyExpense] = useState(null);
-
-  const initialLoadedAtRef = useRef(Date.now());
   const { hasExpenseOnDate } = useExpenseDateHighlights();
 
   const money = (value) =>
@@ -151,6 +134,53 @@ export default function Reports() {
       style: "currency",
       currency: "USD"
     }).format(Number(value || 0));
+
+  const renderNonZeroScatterDot = ({ cx, cy, fill, payload, dataKey }) => {
+    const value = Number(payload?.[dataKey] || 0);
+    if (!Number.isFinite(value) || value <= 0) return null;
+    return <circle cx={cx} cy={cy} r={4} fill={fill} stroke={fill} />;
+  };
+
+
+  const renderExpenseTooltip = (props, formatLabel) => {
+    const { active, payload, label } = props || {};
+    if (!active || !Array.isArray(payload) || payload.length === 0) return null;
+
+    const valueByCategory = new Map();
+
+    payload.forEach((entry) => {
+      const rawName = String(entry?.name || entry?.dataKey || "").trim();
+      const normalized = rawName.replace(/\s*\(Scatter\)\s*$/i, "").trim();
+      if (!normalized) return;
+      if (normalized === "day" || normalized === "weekIndex" || normalized === "monthLabel") return;
+
+      const value = Number(entry?.value || 0);
+      if (!Number.isFinite(value) || value <= 0) return;
+
+      const existing = valueByCategory.get(normalized);
+      if (!existing || value > existing.value) {
+        valueByCategory.set(normalized, { value, color: getCategoryColor(normalized) });
+      }
+    });
+
+    const rows = Array.from(valueByCategory.entries()).sort((a, b) => b[1].value - a[1].value);
+    if (!rows.length) return null;
+
+    const title = typeof formatLabel === "function" ? formatLabel(label) : String(label ?? "");
+
+    return (
+      <div className="chart-click-tooltip" style={{ margin: 0, minWidth: 220 }}>
+        <div style={{ fontWeight: 700, marginBottom: 8, color: "#f8fafc" }}>{title}</div>
+        <div style={{ display: "grid", gap: 4 }}>
+          {rows.map(([name, meta]) => (
+            <div key={`tt-${name}`} style={{ color: meta.color, fontWeight: 600 }}>
+              {name}: {money(meta.value)}
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  };
 
   const selectedContext = useMemo(() => {
     const now = new Date();
@@ -243,27 +273,26 @@ export default function Reports() {
     });
   }, [filterDate, rangeExpenses]);
 
-  const weeklyWindow = useMemo(() => {
+  const fourWeekWindow = useMemo(() => {
     const base = filterDate
       ? new Date(filterDate)
       : new Date(selectedContext.year, selectedContext.month, 1);
-    const anchor = toStartOfDay(base);
-    const weekStart = new Date(anchor);
-    weekStart.setDate(anchor.getDate() - anchor.getDay());
-    const weekEnd = new Date(weekStart);
-    weekEnd.setDate(weekStart.getDate() + 7);
-    return { weekStart, weekEnd };
+    const rangeEnd = toStartOfDay(base);
+    const rangeStart = new Date(rangeEnd);
+    rangeStart.setDate(rangeEnd.getDate() - 27);
+    return { rangeStart, rangeEnd };
   }, [filterDate, selectedContext.month, selectedContext.year]);
 
-  const weeklyExpenses = useMemo(() => {
-    const { weekStart, weekEnd } = weeklyWindow;
+  const fourWeekExpenses = useMemo(() => {
+    const { rangeStart, rangeEnd } = fourWeekWindow;
+    const endMs = rangeEnd.getTime() + 24 * 60 * 60 * 1000;
     return rangeExpenses.filter((expense) => {
       const d = new Date(expense.date || expense.createdAt);
       if (!isValidDate(d)) return false;
       const t = d.getTime();
-      return t >= weekStart.getTime() && t < weekEnd.getTime();
+      return t >= rangeStart.getTime() && t < endMs;
     });
-  }, [rangeExpenses, weeklyWindow]);
+  }, [rangeExpenses, fourWeekWindow]);
 
   const monthlyTotal = useMemo(
     () => monthExpenses.reduce((sum, e) => sum + Number(e.amount || 0), 0),
@@ -292,10 +321,10 @@ export default function Reports() {
 
   const categoryScopeExpenses = useMemo(() => {
     if (timeFilter === "daily") return selectedDayExpenses;
-    if (timeFilter === "weekly") return weeklyExpenses;
+    if (timeFilter === "weekly") return fourWeekExpenses;
     if (timeFilter === "yearly") return yearExpenses;
     return monthExpenses;
-  }, [monthExpenses, selectedDayExpenses, timeFilter, weeklyExpenses, yearExpenses]);
+  }, [fourWeekExpenses, monthExpenses, selectedDayExpenses, timeFilter, yearExpenses]);
 
   const categoryChartData = useMemo(() => {
     const categoryMap = {};
@@ -318,110 +347,188 @@ export default function Reports() {
     return maxName;
   }, [categoryChartData]);
 
-  const weeklyChartData = useMemo(() => {
-    const labels = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-    const sums = {};
-    weeklyExpenses.forEach((expense) => {
-      const d = new Date(expense.date || expense.createdAt);
-      if (!isValidDate(d)) return;
-      const k = dayKey(d);
-      sums[k] = (sums[k] || 0) + Number(expense.amount || 0);
-    });
-    return Array.from({ length: 7 }, (_, idx) => {
-      const dd = new Date(weeklyWindow.weekStart);
-      dd.setDate(weeklyWindow.weekStart.getDate() + idx);
-      const k = dayKey(dd);
+  const weeklyTrendData = useMemo(() => {
+    const rows = Array.from({ length: 4 }, (_, weekIdx) => {
+      const startDate = new Date(fourWeekWindow.rangeStart);
+      startDate.setDate(fourWeekWindow.rangeStart.getDate() + weekIdx * 7);
+      const endDate = new Date(startDate);
+      endDate.setDate(startDate.getDate() + 6);
       return {
-        day: labels[idx],
-        dayLabel: formatDateMMDD(dd),
-        amount: Number(sums[k] || 0),
-        dateValue: dd
+        weekIndex: weekIdx + 1,
+        rangeLabel: `${getDayOnlyLabel(startDate)}-${getDayOnlyLabel(endDate)}`,
+        startDate,
+        endDate,
+        amount: 0
       };
     });
-  }, [weeklyExpenses, weeklyWindow.weekStart]);
 
-  const dailyTotalsChartData = useMemo(() => {
+    fourWeekExpenses.forEach((expense) => {
+      const d = new Date(expense.date || expense.createdAt);
+      if (!isValidDate(d)) return;
+      const diffDays = Math.floor(
+        (toStartOfDay(d).getTime() - fourWeekWindow.rangeStart.getTime()) / (24 * 60 * 60 * 1000)
+      );
+      const weekIdx = Math.floor(diffDays / 7);
+      if (weekIdx < 0 || weekIdx > 3) return;
+      rows[weekIdx].amount += Number(expense.amount || 0);
+    });
+
+    return rows;
+  }, [fourWeekExpenses, fourWeekWindow.rangeStart]);
+
+  const weeklyStackCategories = useMemo(() => {
+    const set = new Set();
+    fourWeekExpenses.forEach((expense) => set.add(expense.category || "Others"));
+    return Array.from(set);
+  }, [fourWeekExpenses]);
+
+  const weeklyStackedData = useMemo(() => {
+    const rows = Array.from({ length: 4 }, (_, weekIdx) => {
+      const startDate = new Date(fourWeekWindow.rangeStart);
+      startDate.setDate(fourWeekWindow.rangeStart.getDate() + weekIdx * 7);
+      const endDate = new Date(startDate);
+      endDate.setDate(startDate.getDate() + 6);
+      const base = {
+        weekIndex: weekIdx + 1,
+        rangeLabel: `${getDayOnlyLabel(startDate)}-${getDayOnlyLabel(endDate)}`,
+        startDate,
+        endDate
+      };
+      weeklyStackCategories.forEach((cat) => {
+        base[cat] = 0;
+      });
+      return base;
+    });
+
+    fourWeekExpenses.forEach((expense) => {
+      const d = new Date(expense.date || expense.createdAt);
+      if (!isValidDate(d)) return;
+      const diffDays = Math.floor(
+        (toStartOfDay(d).getTime() - fourWeekWindow.rangeStart.getTime()) / (24 * 60 * 60 * 1000)
+      );
+      const weekIdx = Math.floor(diffDays / 7);
+      if (weekIdx < 0 || weekIdx > 3) return;
+      const category = expense.category || "Others";
+      rows[weekIdx][category] = Number(rows[weekIdx][category] || 0) + Number(expense.amount || 0);
+    });
+
+    return rows;
+  }, [fourWeekExpenses, fourWeekWindow.rangeStart, weeklyStackCategories]);
+
+  const dailyStackCategories = useMemo(() => {
+    const set = new Set();
+    monthExpenses.forEach((expense) => set.add(expense.category || "Others"));
+    return Array.from(set);
+  }, [monthExpenses]);
+
+  const dailyStackedData = useMemo(() => {
     const daysInMonth = new Date(selectedContext.year, selectedContext.month + 1, 0).getDate();
-    const sums = {};
+    const rows = Array.from({ length: daysInMonth }, (_, idx) => {
+      const day = idx + 1;
+      const dateValue = new Date(selectedContext.year, selectedContext.month, day);
+      const base = { day, dayLabel: getDayOnlyLabel(dateValue), dateValue };
+      dailyStackCategories.forEach((cat) => {
+        base[cat] = 0;
+      });
+      return base;
+    });
+
+    monthExpenses.forEach((expense) => {
+      const d = new Date(expense.date || expense.createdAt);
+      if (!isValidDate(d)) return;
+      const dayIndex = d.getDate() - 1;
+      const category = expense.category || "Others";
+      rows[dayIndex][category] = Number(rows[dayIndex][category] || 0) + Number(expense.amount || 0);
+    });
+
+    return rows;
+  }, [dailyStackCategories, monthExpenses, selectedContext.month, selectedContext.year]);
+  const monthlyStackCategories = useMemo(() => {
+    const set = new Set();
+    yearExpenses.forEach((expense) => set.add(expense.category || "Others"));
+    return Array.from(set);
+  }, [yearExpenses]);
+
+  const monthlyStackedData = useMemo(() => {
+    const rows = Array.from({ length: 12 }, (_, idx) => {
+      const dateValue = new Date(selectedContext.year, idx, 1);
+      const base = {
+        monthIndex: idx + 1,
+        monthLabel: dateValue.toLocaleString("en-US", { month: "short" }),
+        dateValue
+      };
+      monthlyStackCategories.forEach((cat) => {
+        base[cat] = 0;
+      });
+      return base;
+    });
+
+    yearExpenses.forEach((expense) => {
+      const d = new Date(expense.date || expense.createdAt);
+      if (!isValidDate(d)) return;
+      const monthIdx = d.getMonth();
+      const category = expense.category || "Others";
+      rows[monthIdx][category] = Number(rows[monthIdx][category] || 0) + Number(expense.amount || 0);
+    });
+
+    return rows;
+  }, [monthlyStackCategories, selectedContext.year, yearExpenses]);
+
+  const weeklyStackedChartData = useMemo(() => {
+    return weeklyStackedData.map((row) => ({
+      ...row,
+      total: weeklyStackCategories.reduce((sum, category) => sum + Number(row[category] || 0), 0)
+    }));
+  }, [weeklyStackCategories, weeklyStackedData]);
+
+  const dailyStackedChartData = useMemo(() => {
+    return dailyStackedData.map((row) => ({
+      ...row,
+      total: dailyStackCategories.reduce((sum, category) => sum + Number(row[category] || 0), 0)
+    }));
+  }, [dailyStackCategories, dailyStackedData]);
+
+  const monthlyStackedChartData = useMemo(() => {
+    return monthlyStackedData.map((row) => ({
+      ...row,
+      total: monthlyStackCategories.reduce((sum, category) => sum + Number(row[category] || 0), 0)
+    }));
+  }, [monthlyStackCategories, monthlyStackedData]);
+
+  const topExpenseStackData = useMemo(() => {
+    const map = {};
+    monthExpenses.forEach((expense) => {
+      const category = expense.category || "Others";
+      map[category] = (map[category] || 0) + Number(expense.amount || 0);
+    });
+
+    return Object.entries(map)
+      .map(([category, amount]) => ({ category, amount: Number(amount) }))
+      .sort((a, b) => b.amount - a.amount);
+  }, [monthExpenses]);
+
+  const monthlyTrendData = useMemo(() => {
+    const daysInMonth = new Date(selectedContext.year, selectedContext.month + 1, 0).getDate();
+    const rows = Array.from({ length: 4 }, (_, weekIdx) => {
+      const startDay = weekIdx * 7 + 1;
+      const endDay = weekIdx === 3 ? daysInMonth : Math.min(daysInMonth, startDay + 6);
+      return {
+        weekIndex: weekIdx + 1,
+        rangeLabel: `${String(startDay).padStart(2, "0")}-${String(endDay).padStart(2, "0")}`,
+        amount: 0
+      };
+    });
+
     monthExpenses.forEach((expense) => {
       const d = new Date(expense.date || expense.createdAt);
       if (!isValidDate(d)) return;
       const day = d.getDate();
-      sums[day] = (sums[day] || 0) + Number(expense.amount || 0);
+      const weekIdx = Math.min(3, Math.floor((day - 1) / 7));
+      rows[weekIdx].amount += Number(expense.amount || 0);
     });
 
-    return Array.from({ length: daysInMonth }, (_, idx) => {
-      const day = idx + 1;
-      const dateValue = new Date(selectedContext.year, selectedContext.month, day);
-      return {
-        day,
-        amount: Number(sums[day] || 0),
-        dateValue,
-        dateLabel: formatDateMMDD(dateValue)
-      };
-    });
+    return rows;
   }, [monthExpenses, selectedContext.month, selectedContext.year]);
-
-  const selectedDayForMonthView = useMemo(() => {
-    if (!filterDate) return null;
-    const d = new Date(filterDate);
-    if (!isValidDate(d)) return null;
-    if (d.getMonth() !== selectedContext.month || d.getFullYear() !== selectedContext.year) return null;
-    return d.getDate();
-  }, [filterDate, selectedContext.month, selectedContext.year]);
-
-  const monthlyScatterData = useMemo(() => {
-    return monthExpenses.map((expense, index) => {
-      const d = new Date(expense.date || expense.createdAt);
-      return {
-        id: expense._id || `${index}`,
-        day: d.getDate(),
-        amount: Number(expense.amount || 0),
-        category: expense.category || "Others",
-        categoryKey: normalizeCategory(expense.category),
-        dateValue: d,
-        dotColor: getExpenseDotColor(expense._id || `${expense.amount}-${d.getTime()}-${index}`),
-        raw: expense
-      };
-    });
-  }, [monthExpenses]);
-
-  const availableScatterCategories = useMemo(() => {
-    const map = new Map(); // key -> display label (first seen)
-    monthlyScatterData.forEach((row) => {
-      if (!map.has(row.categoryKey)) map.set(row.categoryKey, row.category || "Others");
-    });
-    return Array.from(map.entries()).map(([key, label]) => ({
-      key,
-      label,
-      color: getCategoryColor(label)
-    }));
-  }, [monthlyScatterData]);
-
-  const filteredMonthlyScatterData = useMemo(() => {
-    if (!scatterCategoryFilters.length) return monthlyScatterData;
-    const allowed = new Set(scatterCategoryFilters);
-    return monthlyScatterData.filter((row) => allowed.has(row.categoryKey));
-  }, [monthlyScatterData, scatterCategoryFilters]);
-
-  const dailySpendingScatterData = useMemo(() => {
-    const selectedDateKey = filterDate ? dayKey(filterDate) : null;
-    return monthExpenses.map((expense, index) => {
-      const expenseDate = new Date(expense.date || expense.createdAt);
-      const created = expense.createdAt ? new Date(expense.createdAt) : expenseDate;
-      return {
-        id: expense._id || `${index}`,
-        day: expenseDate.getDate(),
-        amount: Number(expense.amount || 0),
-        category: expense.category || "Others",
-        dateValue: expenseDate,
-        isSelectedDate: Boolean(selectedDateKey) && dayKey(expenseDate) === selectedDateKey,
-        isNew: isValidDate(created) && created.getTime() > initialLoadedAtRef.current,
-        dotColor: getExpenseDotColor(expense._id || `${expense.amount}-${expenseDate.getTime()}-${index}`),
-        raw: expense
-      };
-    });
-  }, [filterDate, monthExpenses]);
 
   const twelveMonthChartData = useMemo(() => {
     const totals = {};
@@ -443,15 +550,63 @@ export default function Reports() {
     });
   }, [selectedContext.month, selectedContext.year, yearExpenses]);
 
-  const selectedMonthLabelForView = useMemo(
-    () => twelveMonthChartData.find((m) => m.isSelectedMonth)?.label || null,
-    [twelveMonthChartData]
-  );
-
   const diff = monthlyTotal - lastMonthSummary.total;
   const percentChange =
     lastMonthSummary.total > 0 ? ((diff / lastMonthSummary.total) * 100).toFixed(1) : "0.0";
 
+
+  const noExpenseDays = useMemo(() => {
+    return dailyStackedData.filter((row) => {
+      const total = dailyStackCategories.reduce((sum, category) => {
+        return sum + Number(row[category] || 0);
+      }, 0);
+      return total === 0;
+    }).length;
+  }, [dailyStackCategories, dailyStackedData]);
+
+  const monthlyHighestExpense = useMemo(() => {
+    let amount = 0;
+    let category = "None";
+    let date = "-";
+
+    monthExpenses.forEach((expense) => {
+      const value = Number(expense.amount || 0);
+      if (value > amount) {
+        amount = value;
+        category = expense.category || "Others";
+        const d = new Date(expense.date || expense.createdAt);
+        date = isValidDate(d) ? formatDateMMDDYYYY(d) : "-";
+      }
+    });
+
+    return { amount, category, date };
+  }, [monthExpenses]);
+
+  const alerts = useMemo(() => {
+    const items = [];
+
+    if (lastMonthSummary.total > 0) {
+      const change = ((monthlyTotal - lastMonthSummary.total) / lastMonthSummary.total) * 100;
+      items.push({
+        level: change < 0 ? "warn" : "info",
+        text: `Month vs last month: ${change >= 0 ? "+" : ""}${change.toFixed(1)}%`
+      });
+    }
+
+    if (monthlyHighestExpense.amount > 0) {
+      items.push({
+        level: "info",
+        text: `Highest expense: ${money(monthlyHighestExpense.amount)} (${monthlyHighestExpense.category}) on ${monthlyHighestExpense.date}`
+      });
+    }
+
+    items.push({
+      level: noExpenseDays > 0 ? "warn" : "ok",
+      text: `No-expense days in This month: ${noExpenseDays}`
+    });
+
+    return items;
+  }, [lastMonthSummary.total, money, monthlyHighestExpense, monthlyTotal, noExpenseDays]);
   const resetFilters = () => {
     setFilterMonth("");
     setFilterYear("");
@@ -473,11 +628,7 @@ export default function Reports() {
               key={f.key}
               type="button"
               className={`time-filter-btn ${timeFilter === f.key ? "active" : ""}`}
-              onClick={() => {
-                setTimeFilter(f.key);
-                setClickedMonthlyExpense(null);
-                setClickedDailyExpense(null);
-              }}
+              onClick={() => setTimeFilter(f.key)}
             >
               {f.label}
             </button>
@@ -522,6 +673,7 @@ export default function Reports() {
               setFilterYear("");
             }}
             dateFormat="MM/dd/yyyy"
+            placeholderText="Select date"
             showMonthDropdown
             showYearDropdown
             dropdownMode="select"
@@ -533,7 +685,6 @@ export default function Reports() {
             isClearable
             className="date-picker-input"
             calendarClassName="modern-calendar"
-            placeholderText="Select date"
             dayClassName={(day) => (hasExpenseOnDate(day) ? "expense-day-highlight" : undefined)}
           />
           <button onClick={resetFilters}>Reset</button>
@@ -569,17 +720,52 @@ export default function Reports() {
         </div>
 
         <div className="charts-container report-chart-grid">
-          {(timeFilter === "weekly" || timeFilter === "all") && (
-            <div className="report-chart-card report-chart-card--wide">
+                    {(timeFilter === "all" || timeFilter === "weekly" || timeFilter === "monthly") && (
+            <div className="report-chart-card report-chart-card--third">
               <div className="report-chart-header">
-                <h3>Weekly Trend</h3>
+                <h3>Alerts</h3>
+              </div>
+
+              {rangeLoading ? (
+                <p className="chart-note">Loading...</p>
+              ) : (
+                <>
+                  <p className="chart-note">Quick monthly alert summary.</p>
+                  <div style={{ display: "grid", gap: "10px" }}>
+                    {alerts.map((alert, idx) => (
+                      <div
+                        key={`alert-${idx}`}
+                        className="chart-click-tooltip"
+                        style={{
+                          margin: 0,
+                          borderColor:
+                            alert.level === "warn"
+                              ? "rgba(248,113,113,0.55)"
+                              : alert.level === "ok"
+                                ? "rgba(74,222,128,0.55)"
+                                : "rgba(56,189,248,0.55)"
+                        }}
+                      >
+                        {alert.text}
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+
+          {(timeFilter === "all" || timeFilter === "monthly") && (
+            <div className="report-chart-card report-chart-card--wide report-chart-card--daily">
+              <div className="report-chart-header">
+                <h3>Daily Trend ({currentMonthLabel})</h3>
                 <div className="chart-mode-buttons">
                   {CHART_MODES.map((mode) => (
                     <button
                       key={mode}
                       type="button"
-                      className={`chart-mode-btn ${trendMode === mode ? "active" : ""}`}
-                      onClick={() => setTrendMode(mode)}
+                      className={`chart-mode-btn ${monthMode === mode ? "active" : ""}`}
+                      onClick={() => setMonthMode(mode)}
                     >
                       {mode === "both" ? "Both" : mode.charAt(0).toUpperCase() + mode.slice(1)}
                     </button>
@@ -591,24 +777,36 @@ export default function Reports() {
                 <p className="chart-note">Loading...</p>
               ) : (
                 <>
-                  <p className="chart-note">7 days shown. Days with no expense stay at 0.</p>
-                  <ResponsiveContainer width="100%" height={290}>
-                    <ComposedChart data={weeklyChartData} margin={{ top: 20, right: 20, left: 0, bottom: 5 }}>
+                  <p className="chart-note">All days in selected month are shown (30/31). Days with no expense stay at 0.</p>
+                  <ResponsiveContainer width="100%" height={380}>
+                    <ComposedChart data={dailyStackedChartData} margin={{ top: 20, right: 20, left: 0, bottom: 22 }}>
                       <CartesianGrid stroke="rgba(255,255,255,0.08)" strokeDasharray="3 3" />
-                      <XAxis dataKey="dayLabel" interval={0} tick={{ fill: "#fafcff", fontSize: 12 }} axisLine={false} tickLine={false} />
-                      <YAxis
-                        tickFormatter={(value) => money(value)}
-                        tick={{ fill: "#fefeff", fontSize: 12 }}
+                      <XAxis
+                        dataKey="day"
+                        interval={0}
+                        tickFormatter={(day) => String(day).padStart(2, "0")}
+                        tick={{ fill: "#fafcff", fontSize: 10 }}
+                        angle={-35}
+                        textAnchor="end"
+                        height={54}
                         axisLine={false}
                         tickLine={false}
                       />
-                      <Tooltip formatter={(value) => money(value)} contentStyle={{ background: "#0f172a", border: "none", borderRadius: "10px", color: "#fff" }} />
+                      <YAxis tick={{ fill: "#fefeff", fontSize: 12 }} axisLine={false} tickLine={false} />
+                      <Tooltip
+                        formatter={(value) => money(value)}
+                        labelFormatter={(day) => {
+                          const d = new Date(selectedContext.year, selectedContext.month, Number(day));
+                          return formatDateMMDDYYYY(d);
+                        }}
+                        contentStyle={{ background: "#0f172a", border: "none", borderRadius: "10px", color: "#fff" }}
+                      />
                       <Legend />
-                      {(trendMode === "bar" || trendMode === "both") && (
-                        <Bar dataKey="amount" name="Weekly Total (Bar)" radius={[6, 6, 0, 0]} animationDuration={800} fill="#38bdf8" />
+                      {(monthMode === "bar" || monthMode === "both") && (
+                        <Bar dataKey="total" name="Daily Total (Bar)" radius={[6, 6, 0, 0]} animationDuration={800} fill="#7c3aed" />
                       )}
-                      {(trendMode === "line" || trendMode === "both") && (
-                        <Line type="monotone" dataKey="amount" name="Weekly Total (Line)" stroke="#22d3ee" strokeWidth={3} animationDuration={900} />
+                      {(monthMode === "line" || monthMode === "both") && (
+                        <Line type="monotone" dataKey="total" name="Daily Total (Line)" stroke="#1bc86c" strokeWidth={3} animationDuration={900} />
                       )}
                     </ComposedChart>
                   </ResponsiveContainer>
@@ -616,67 +814,55 @@ export default function Reports() {
               )}
             </div>
           )}
-
-          {(timeFilter === "weekly" || timeFilter === "all") && (
+          {(timeFilter === "all" || timeFilter === "monthly" || timeFilter === "yearly") && (
             <div className="report-chart-card report-chart-card--third">
               <div className="report-chart-header">
-                <h3>Weekly Expense Scatter</h3>
+                <h3>Monthly Line/Bar Overview</h3>
+                <div className="chart-mode-buttons">
+                  {CHART_MODES.map((mode) => (
+                    <button
+                      key={`monthly-summary-${mode}`}
+                      type="button"
+                      className={`chart-mode-btn ${monthlySummaryMode === mode ? "active" : ""}`}
+                      onClick={() => setMonthlySummaryMode(mode)}
+                    >
+                      {mode === "both" ? "Both" : mode.charAt(0).toUpperCase() + mode.slice(1)}
+                    </button>
+                  ))}
+                </div>
               </div>
 
               {rangeLoading ? (
                 <p className="chart-note">Loading...</p>
               ) : (
                 <>
-                  <p className="chart-note">
-                    Each dot represents an expense in the selected week.
-                  </p>
-
-                  <ResponsiveContainer width="100%" height={300}>
-                    <ScatterChart margin={{ top: 20, right: 20, left: 0, bottom: 16 }}>
+                  <p className="chart-note">12-month totals view. Switch between line, bar, or both.</p>
+                  <ResponsiveContainer width="100%" height={380}>
+                    <ComposedChart data={monthlyStackedChartData} margin={{ top: 20, right: 20, left: 0, bottom: 10 }}>
                       <CartesianGrid stroke="rgba(255,255,255,0.08)" strokeDasharray="3 3" />
-
                       <XAxis
-                        type="category"
-                        dataKey="day"
-                        tick={{ fill: "#fafcff", fontSize: 12 }}
+                        dataKey="monthLabel"
+                        interval={0}
+                        tick={{ fill: "#fafcff", fontSize: 10 }}
                         axisLine={false}
                         tickLine={false}
                       />
-
-                      <YAxis
-                        tickFormatter={(value) => money(value)}
-                        tick={{ fill: "#fefeff", fontSize: 12 }}
-                        axisLine={false}
-                        tickLine={false}
+                      <YAxis tick={{ fill: "#fefeff", fontSize: 12 }} axisLine={false} tickLine={false} />
+                      <Tooltip
+                        formatter={(value) => money(value)}
+                        labelFormatter={(monthLabel) => `${monthLabel} ${selectedContext.year}`}
+                        contentStyle={{ background: "#0f172a", border: "none", borderRadius: "10px", color: "#fff" }}
                       />
+                      <Legend />
 
-                      <Tooltip formatter={(value) => money(value)} />
+                      {(monthlySummaryMode === "bar" || monthlySummaryMode === "both") && (
+                        <Bar dataKey="total" name="Monthly Total (Bar)" radius={[6, 6, 0, 0]} animationDuration={800} fill="#38bdf8" />
+                      )}
 
-                      <Scatter
-                        data={weeklyExpenses.map((e, i) => {
-                          const d = new Date(e.date || e.createdAt);
-                          return {
-                            day: ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"][d.getDay()],
-                            amount: Number(e.amount || 0),
-                            dotColor: getExpenseDotColor(e._id || i),
-                            raw: e
-                          };
-                        })}
-                        shape={(props) => {
-                          const { cx, cy, payload } = props;
-                          return (
-                            <circle
-                              cx={cx}
-                              cy={cy}
-                              r={5}
-                              fill={payload.dotColor}
-                              stroke="#0f172a"
-                              strokeWidth={1.5}
-                            />
-                          );
-                        }}
-                      />
-                    </ScatterChart>
+                      {(monthlySummaryMode === "line" || monthlySummaryMode === "both") && (
+                        <Line type="monotone" dataKey="total" name="Monthly Total (Line)" stroke="#ee229c" strokeWidth={3} animationDuration={900} />
+                      )}
+                    </ComposedChart>
                   </ResponsiveContainer>
                 </>
               )}
@@ -684,16 +870,16 @@ export default function Reports() {
           )}
 
           {(timeFilter === "all" || timeFilter === "monthly") && (
-            <div className="report-chart-card report-chart-card--third">
+            <div className="report-chart-card report-chart-card--wide report-chart-card--daily">
               <div className="report-chart-header">
                 <h3>Daily Expenses ({currentMonthLabel})</h3>
                 <div className="chart-mode-buttons">
-                  {CHART_MODES.map((mode) => (
+                  {STACK_VIEW_MODES.map((mode) => (
                     <button
-                      key={mode}
+                      key={`daily-expense-mode-${mode}`}
                       type="button"
-                      className={`chart-mode-btn ${dailyMode === mode ? "active" : ""}`}
-                      onClick={() => setDailyMode(mode)}
+                      className={`chart-mode-btn ${dailyExpenseMode === mode ? "active" : ""}`}
+                      onClick={() => setDailyExpenseMode(mode)}
                     >
                       {mode === "both" ? "Both" : mode.charAt(0).toUpperCase() + mode.slice(1)}
                     </button>
@@ -703,52 +889,55 @@ export default function Reports() {
 
               {rangeLoading ? (
                 <p className="chart-note">Loading...</p>
+              ) : dailyStackCategories.length === 0 ? (
+                <p className="chart-note">No expenses found for this month.</p>
               ) : (
                 <>
-                  <p className="chart-note">All days of the month are shown. Days with no expense stay at 0.</p>
-                  <ResponsiveContainer width="100%" height={290}>
-                    <ComposedChart data={dailyTotalsChartData} margin={{ top: 20, right: 20, left: 0, bottom: 16 }}>
+                  <p className="chart-note">Switch view: stacked categories, category-wise scatter points, or both together.</p>
+                  <ResponsiveContainer width="100%" height={380}>
+                    <ComposedChart data={dailyStackedChartData} margin={{ top: 20, right: 20, left: 0, bottom: 28 }}>
                       <CartesianGrid stroke="rgba(255,255,255,0.08)" strokeDasharray="3 3" />
                       <XAxis
                         dataKey="day"
-                        tickFormatter={(day) =>
-                          formatDateMMDD(new Date(selectedContext.year, selectedContext.month, Number(day || 1)))
-                        }
-                        interval="preserveStartEnd"
-                        minTickGap={20}
-                        tick={{ fill: "#fafcff", fontSize: 11 }}
+                        interval={0}
+                        tickFormatter={(day) => String(day).padStart(2, "0")}
+                        tick={{ fill: "#fafcff", fontSize: 10 }}
+                        angle={-35}
                         textAnchor="end"
+                        height={56}
                         axisLine={false}
                         tickLine={false}
                       />
-                      <YAxis
-                        type="number"
-                        dataKey="amount"
-                        tickFormatter={(value) => money(value)}
-                        tick={{ fill: "#fefeff", fontSize: 12 }}
-                        axisLine={false}
-                        tickLine={false}
-                      />
+                      <YAxis tick={{ fill: "#fefeff", fontSize: 12 }} axisLine={false} tickLine={false} />
                       <Tooltip
-                        formatter={(value) => money(value)}
-                        labelFormatter={(label) => {
-                          const day = Number(label);
-                          if (!Number.isFinite(day)) return String(label);
-                          const d = new Date(selectedContext.year, selectedContext.month, day);
-                          return formatDateMMDDYYYY(d);
-                        }}
-                        contentStyle={{ background: "#0f172a", border: "none", borderRadius: "10px", color: "#fff" }}
+                        cursor={{ fill: "rgba(255,255,255,0.04)" }}
+                        content={(props) =>
+                          renderExpenseTooltip(props, (day) => {
+                            const d = new Date(selectedContext.year, selectedContext.month, Number(day));
+                            return formatDateMMDDYYYY(d);
+                          })
+                        }
                       />
                       <Legend />
-                      {selectedDayForMonthView && (
-                        <ReferenceLine x={selectedDayForMonthView} stroke="#facc15" strokeDasharray="4 4" />
-                      )}
-                      {(dailyMode === "bar" || dailyMode === "both") && (
-                        <Bar dataKey="amount" name="Daily Total (Bar)" radius={[6, 6, 0, 0]} animationDuration={800} fill="#38bdf8" />
-                      )}
-                      {(dailyMode === "line" || dailyMode === "both") && (
-                        <Line type="monotone" dataKey="amount" name="Daily Total (Line)" stroke="#ee22eb" strokeWidth={3} animationDuration={900} />
-                      )}
+                      {(dailyExpenseMode === "stack" || dailyExpenseMode === "both") && dailyStackCategories.map((category) => (
+                        <Bar
+                          key={`daily-${category}`}
+                          dataKey={category}
+                          stackId="daily"
+                          fill={getCategoryColor(category)}
+                          name={category}
+                        />
+                      ))}
+                      {(dailyExpenseMode === "scatter" || dailyExpenseMode === "both") && dailyStackCategories.map((category) => (
+                        <Scatter
+                          key={`daily-scatter-${category}`}
+                          dataKey={category}
+                          name={`${category} (Scatter)`}
+                          fill={getCategoryColor(category)}
+                          stroke={getCategoryColor(category)}
+                          shape={(props) => renderNonZeroScatterDot({ ...props, dataKey: category })}
+                        />
+                      ))}
                     </ComposedChart>
                   </ResponsiveContainer>
                 </>
@@ -756,197 +945,146 @@ export default function Reports() {
             </div>
           )}
 
-          {(!TEMP_DISABLE_MONTHLY_SCATTER && (timeFilter === "all" || timeFilter === "monthly")) && (
+                    {(timeFilter === "all" || timeFilter === "monthly" || timeFilter === "yearly") && (
             <div className="report-chart-card report-chart-card--third">
               <div className="report-chart-header">
-                <h3>Monthly Expense Scatter</h3>
-              </div>
-
-              {rangeLoading ? (
-                <p className="chart-note">Loading...</p>
-              ) : (
-                <>
-                  <div className="category-filter-row">
+                <h3>Monthly Expenses (12 Months)</h3>
+                <div className="chart-mode-buttons">
+                  {STACK_VIEW_MODES.map((mode) => (
                     <button
+                      key={`monthly-expense-mode-${mode}`}
                       type="button"
-                      className={`category-filter-btn ${scatterCategoryFilters.length === 0 ? "active" : ""}`}
-                      onClick={() => {
-                        setScatterCategoryFilters([]);
-                        setClickedMonthlyExpense(null);
-                      }}
-                      title="Show all categories"
+                      className={`chart-mode-btn ${monthlyExpenseMode === mode ? "active" : ""}`}
+                      onClick={() => setMonthlyExpenseMode(mode)}
                     >
-                      All
+                      {mode === "both" ? "Both" : mode.charAt(0).toUpperCase() + mode.slice(1)}
                     </button>
-                    {availableScatterCategories.map((c) => {
-                      const isActive = scatterCategoryFilters.includes(c.key);
-                      return (
-                        <button
-                          key={c.key}
-                          type="button"
-                          className={`category-filter-btn ${isActive ? "active" : ""}`}
-                          onClick={() => {
-                            setClickedMonthlyExpense(null);
-                            setScatterCategoryFilters((prev) => {
-                              const next = new Set(prev);
-                              if (next.has(c.key)) next.delete(c.key);
-                              else next.add(c.key);
-                              return Array.from(next);
-                            });
-                          }}
-                          title={`Toggle ${c.label}`}
-                        >
-                          <span className="category-color-dot" style={{ background: c.color }} />
-                          {c.label}
-                        </button>
-                      );
-                    })}
-                  </div>
-
-                  <p className="chart-note">Each dot is an expense. Click a dot to view details. Use the buttons above to select multiple types.</p>
-                  {clickedMonthlyExpense && (
-                    <div className="chart-click-tooltip">
-                      <div><strong>Amount:</strong> {money(clickedMonthlyExpense.amount)}</div>
-                      <div><strong>Category:</strong> {clickedMonthlyExpense.category}</div>
-                      <div><strong>Date:</strong> {formatDateMMDDYYYY(clickedMonthlyExpense.dateValue)}</div>
-                    </div>
-                  )}
-
-                  {filteredMonthlyScatterData.length === 0 ? (
-                    <p className="chart-note">No expenses for the selected types in this month.</p>
-                  ) : (
-                    <ResponsiveContainer width="100%" height={300}>
-                      <ScatterChart margin={{ top: 20, right: 20, left: 0, bottom: 16 }}>
-                        <CartesianGrid stroke="rgba(255,255,255,0.08)" strokeDasharray="3 3" />
-                        <XAxis
-                          type="number"
-                          dataKey="day"
-                          domain={[1, new Date(selectedContext.year, selectedContext.month + 1, 0).getDate()]}
-                          tickFormatter={(day) =>
-                            formatDateMMDD(new Date(selectedContext.year, selectedContext.month, Number(day || 1)))
-                          }
-                          interval="preserveStartEnd"
-                          minTickGap={25}
-                          tick={{ fill: "#fafcff", fontSize: 11 }}
-                          axisLine={false}
-                          tickLine={false}
-                        />
-                        <YAxis type="number" dataKey="amount" tick={{ fill: "#fefeff", fontSize: 12 }} axisLine={false} tickLine={false} />
-                        <Tooltip content={() => null} />
-                        <Scatter
-                          name="Expenses"
-                          data={filteredMonthlyScatterData}
-                          shape={(props) => {
-                            const { cx, cy, payload } = props;
-                            const fill = payload.dotColor || getCategoryColor(payload.category);
-                            const stroke = payload?.raw?._id === clickedMonthlyExpense?.raw?._id ? "#ffffff" : "#0f172a";
-                            return (
-                              <circle
-                                cx={cx}
-                                cy={cy}
-                                r={5}
-                                fill={fill}
-                                stroke={stroke}
-                                strokeWidth={2}
-                                style={{ cursor: "pointer" }}
-                                onClick={() => setClickedMonthlyExpense(payload)}
-                              />
-                            );
-                          }}
-                        />
-                      </ScatterChart>
-                    </ResponsiveContainer>
-                  )}
-                </>
-              )}
-            </div>
-          )}
-
-          {(timeFilter === "all" || timeFilter === "daily") && (
-            <div className="report-chart-card report-chart-card--third">
-              <div className="report-chart-header">
-                <h3>Daily Spending Distribution</h3>
+                  ))}
+                </div>
               </div>
 
               {rangeLoading ? (
                 <p className="chart-note">Loading...</p>
+              ) : monthlyStackCategories.length === 0 ? (
+                <p className="chart-note">No expenses found for selected year.</p>
               ) : (
                 <>
-                  <p className="chart-note">
-                    X-axis shows all dates in {currentMonthLabel}. Y-axis shows expense amount.
-                    {filterDate ? ` Selected date ${formatDateMMDDYYYY(filterDate)} is highlighted.` : ""}
-                  </p>
-                  {clickedDailyExpense && (
-                    <div className="chart-click-tooltip">
-                      <div><strong>Amount:</strong> {money(clickedDailyExpense.amount)}</div>
-                      <div><strong>Category:</strong> {clickedDailyExpense.category}</div>
-                      <div><strong>Date:</strong> {formatDateMMDDYYYY(clickedDailyExpense.dateValue)}</div>
-                    </div>
-                  )}
-                  <ResponsiveContainer width="100%" height={300}>
-                    <ScatterChart margin={{ top: 20, right: 20, left: 0, bottom: 16 }}>
+                  <p className="chart-note">Switch view: stacked categories, category-wise scatter points, or both together for all 12 months.</p>
+                  <ResponsiveContainer width="100%" height={380}>
+                    <ComposedChart data={monthlyStackedChartData} margin={{ top: 20, right: 20, left: 0, bottom: 10 }}>
                       <CartesianGrid stroke="rgba(255,255,255,0.08)" strokeDasharray="3 3" />
                       <XAxis
-                        type="number"
-                        dataKey="day"
-                        domain={[1, new Date(selectedContext.year, selectedContext.month + 1, 0).getDate()]}
-                        tickFormatter={(day) =>
-                          formatDateMMDD(new Date(selectedContext.year, selectedContext.month, Number(day || 1)))
-                        }
-                        interval="preserveStartEnd"
-                        minTickGap={25}
-                        tick={{ fill: "#fafcff", fontSize: 11 }}
+                        dataKey="monthLabel"
+                        interval={0}
+                        tick={{ fill: "#fafcff", fontSize: 10 }}
                         axisLine={false}
                         tickLine={false}
                       />
-                      <YAxis type="number" dataKey="amount" tick={{ fill: "#fefeff", fontSize: 12 }} axisLine={false} tickLine={false} />
-                      <Tooltip content={() => null} />
-                      {selectedDayForMonthView && (
-                        <ReferenceLine x={selectedDayForMonthView} stroke="#facc15" strokeDasharray="4 4" />
-                      )}
-                      <Scatter
-                        name="Expenses"
-                        data={dailySpendingScatterData}
-                        shape={(props) => {
-                          const { cx, cy, payload } = props;
-                          const fill = payload.dotColor || "#22ee47";
-                          const stroke = payload?.raw?._id === clickedDailyExpense?.raw?._id
-                            ? "#ffffff"
-                            : payload.isSelectedDate
-                              ? "#facc15"
-                              : "#0f172a";
-                          return (
-                            <circle
-                              cx={cx}
-                              cy={cy}
-                              r={5}
-                              fill={fill}
-                              opacity={payload.isNew ? 0.55 : 1}
-                              stroke={stroke}
-                              strokeWidth={payload.isSelectedDate ? 2 : 1.5}
-                              style={{ cursor: "pointer" }}
-                              onClick={() => setClickedDailyExpense(payload)}
-                            />
-                          );
-                        }}
+                      <YAxis tick={{ fill: "#fefeff", fontSize: 12 }} axisLine={false} tickLine={false} />
+                      <Tooltip
+                        cursor={{ fill: "rgba(255,255,255,0.04)" }}
+                        content={(props) =>
+                          renderExpenseTooltip(props, (monthLabel) => `${monthLabel} ${selectedContext.year}`)
+                        }
                       />
-                    </ScatterChart>
+                      <Legend />
+                      {(monthlyExpenseMode === "stack" || monthlyExpenseMode === "both") && monthlyStackCategories.map((category) => (
+                        <Bar
+                          key={`monthly-${category}`}
+                          dataKey={category}
+                          stackId="monthly"
+                          fill={getCategoryColor(category)}
+                          name={category}
+                        />
+                      ))}
+                      {(monthlyExpenseMode === "scatter" || monthlyExpenseMode === "both") && monthlyStackCategories.map((category) => (
+                        <Scatter
+                          key={`monthly-scatter-${category}`}
+                          dataKey={category}
+                          name={`${category} (Scatter)`}
+                          fill={getCategoryColor(category)}
+                          stroke={getCategoryColor(category)}
+                          shape={(props) => renderNonZeroScatterDot({ ...props, dataKey: category })}
+                        />
+                      ))}
+                    </ComposedChart>
                   </ResponsiveContainer>
                 </>
               )}
             </div>
           )}
 
+          {(timeFilter === "all" || timeFilter === "monthly") && (
+            <div className="report-chart-card report-chart-card--wide report-chart-card--daily">
+              <div className="report-chart-header">
+                <h3>Top Expense Stack (High To Low)</h3>
+              </div>
+
+              {rangeLoading ? (
+                <p className="chart-note">Loading...</p>
+              ) : topExpenseStackData.length === 0 ? (
+                <p className="chart-note">No expenses found for this month.</p>
+              ) : (
+                <>
+                  <p className="chart-note">Highest categories are shown at the top and lowest at the bottom.</p>
+                  <ResponsiveContainer width="100%" height={380}>
+                    <BarChart layout="vertical" data={topExpenseStackData} margin={{ top: 10, right: 20, left: 10, bottom: 10 }}>
+                      <CartesianGrid stroke="rgba(255,255,255,0.08)" strokeDasharray="3 3" />
+                      <XAxis type="number" tick={{ fill: "#fefeff", fontSize: 11 }} axisLine={false} tickLine={false} />
+                      <YAxis
+                        type="category"
+                        dataKey="category"
+                        width={90}
+                        tick={{ fill: "#fafcff", fontSize: 11 }}
+                        axisLine={false}
+                        tickLine={false}
+                      />
+                      <Tooltip
+                        formatter={(value, _name, item) => {
+                          const category = item?.payload?.category || "Others";
+                          return [
+                            <span style={{ color: getCategoryColor(category), fontWeight: 700 }}>
+                              {money(value)}
+                            </span>,
+                            "Expense Amount"
+                          ];
+                        }}
+                        labelFormatter={(label) => (
+                          <span style={{ color: getCategoryColor(String(label || "")), fontWeight: 700 }}>
+                            {`Category: ${label}`}
+                          </span>
+                        )}
+                        itemStyle={{ color: "#e2e8f0" }}
+                        contentStyle={{ background: "#0f172a", border: "none", borderRadius: "10px", color: "#fff" }}
+                      />
+                      <Legend
+                        payload={topExpenseStackData.map((entry) => ({
+                          value: entry.category,
+                          type: "square",
+                          color: getCategoryColor(entry.category)
+                        }))}
+                      />
+                      <Bar dataKey="amount" name="Expense Amount" radius={[0, 8, 8, 0]} fill="#64748b">
+                        {topExpenseStackData.map((entry, index) => (
+                          <Cell key={`top-expense-${entry.category}-${index}`} fill={getCategoryColor(entry.category)} />
+                        ))}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                </>
+              )}
+            </div>
+          )}
           <div className="report-chart-card report-chart-card--third">
             <h3>Category Breakdown</h3>
-            <ResponsiveContainer width="100%" height={isCompactPie ? 300 : 340}>
+            <ResponsiveContainer width="100%" height={isCompactPie ? 360 : 420}>
               <PieChart>
                 <Pie
                   data={categoryChartData}
-                  cx={"50%" }
-                  cy={"50%" }
-                  innerRadius={isCompactPie ? "26%" : "30%"}
-                  outerRadius={isCompactPie ? "42%" : "54%"}
+                  cx={"50%"}
+                  cy={"50%"}
+                  innerRadius={isCompactPie ? "28%" : "34%"}
+                  outerRadius={isCompactPie ? "45%" : "62%"}
                   dataKey="value"
                   paddingAngle={3}
                   labelLine={!isCompactPie}
@@ -958,7 +1096,7 @@ export default function Reports() {
                   <Label
                     value={money(categoryScopeExpenses.reduce((sum, e) => sum + Number(e.amount || 0), 0))}
                     position="center"
-                    style={{ fontSize: "20px", fontWeight: "700", fill: "#fdfdfd", textAnchor: "middle", textAlign: "center" }}
+                    style={{ fontSize: "15px", fontWeight: "700", fill: "#fdfdfd", textAnchor: "middle", textAlign: "center" }}
                   />
                 </Pie>
                 <Tooltip formatter={(value) => money(value)} contentStyle={{ background: "#0f172a", border: "none", borderRadius: "10px", color: "#fff" }} />
@@ -973,7 +1111,7 @@ export default function Reports() {
           </div>
 
           {(!TEMP_DISABLE_TWELVE_MONTH_TREND && (timeFilter === "all" || timeFilter === "yearly")) && (
-            <div className="report-chart-card report-chart-card--third">
+            <div className="report-chart-card report-chart-card--full">
               <div className="report-chart-header">
                 <h3>12 Months Trend (Selected Year)</h3>
                 <div className="chart-mode-buttons">
@@ -995,51 +1133,17 @@ export default function Reports() {
               <ResponsiveContainer width="100%" height={340}>
                 <ComposedChart data={twelveMonthChartData} margin={{ top: 20, right: 20, left: 0, bottom: 30 }}>
                   <CartesianGrid stroke="rgba(255,255,255,0.08)" strokeDasharray="3 3" />
-                  <XAxis
-                    dataKey="label"
-                    interval="preserveStartEnd"
-                    minTickGap={20}
-                    tick={{ fill: "#fafcff", fontSize: 11 }}
-                    axisLine={false}
-                    tickLine={false}
-                  />
-                  <YAxis
-                    tickFormatter={(value) => money(value)}
-                    tick={{ fill: "#fefeff", fontSize: 12 }}
-                    axisLine={false}
-                    tickLine={false}
-                  />
+                  <XAxis dataKey="label" interval={0} angle={-17} height={56} textAnchor="end" tick={{ fill: "#fafcff", fontSize: 10 }} axisLine={false} tickLine={false} />
+                  <YAxis tick={{ fill: "#fefeff", fontSize: 12 }} axisLine={false} tickLine={false} />
                   <Tooltip formatter={(value) => money(value)} labelFormatter={(value) => value} contentStyle={{ background: "#0f172a", border: "none", borderRadius: "10px", color: "#fff" }} />
                   <Legend />
-                  {selectedMonthLabelForView && <ReferenceLine x={selectedMonthLabelForView} stroke="#facc15" strokeDasharray="4 4" />}
 
                   {(monthMode === "bar" || monthMode === "both") && (
-                    <Bar dataKey="amount" name="Monthly Total (Bar)" radius={[6, 6, 0, 0]}>
-                      {twelveMonthChartData.map((entry, index) => (
-                        <Cell key={`month-bar-${entry.label}-${index}`} fill={entry.isSelectedMonth ? "#facc15" : "#4ade80"} />
-                      ))}
-                    </Bar>
+                    <Bar dataKey="amount" name="Monthly Total (Bar)" radius={[6, 6, 0, 0]} fill="#4ade80" />
                   )}
 
                   {(monthMode === "line" || monthMode === "both") && (
-                    <Line
-                      type="monotone"
-                      dataKey="amount"
-                      name="Monthly Total (Line)"
-                      stroke="#22d3ee"
-                      strokeWidth={3}
-                      dot={({ cx, cy, payload }) => (
-                        <circle
-                          cx={cx}
-                          cy={cy}
-                          r={payload?.isSelectedMonth ? 6 : 4}
-                          fill={payload?.isSelectedMonth ? "#facc15" : "#22d3ee"}
-                          stroke={payload?.isSelectedMonth ? "#fff" : "#0f172a"}
-                          strokeWidth={payload?.isSelectedMonth ? 2 : 1}
-                        />
-                      )}
-                      activeDot={{ r: 6, fill: "#facc15", stroke: "#fff", strokeWidth: 2 }}
-                    />
+                    <Line type="monotone" dataKey="amount" name="Monthly Total (Line)" stroke="#22d3ee" strokeWidth={3} />
                   )}
                 </ComposedChart>
               </ResponsiveContainer>
@@ -1050,3 +1154,45 @@ export default function Reports() {
     </div>
   );
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
