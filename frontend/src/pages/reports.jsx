@@ -120,6 +120,9 @@ export default function Reports() {
   const [filterMonth, setFilterMonth] = useState("");
   const [filterYear, setFilterYear] = useState("");
   const [filterDate, setFilterDate] = useState(null);
+  const [compareMonth, setCompareMonth] = useState("");
+  const [compareYear, setCompareYear] = useState("");
+  const [isCategoryCompareExpanded, setIsCategoryCompareExpanded] = useState(false);
 
   const [rangeExpenses, setRangeExpenses] = useState([]);
   const [rangeLoading, setRangeLoading] = useState(false);
@@ -195,6 +198,24 @@ export default function Reports() {
     () => getMonthName(selectedContext.month, selectedContext.year),
     [selectedContext.month, selectedContext.year]
   );
+
+  const availableComparisonYears = useMemo(() => {
+    const years = new Set([selectedContext.year]);
+    rangeExpenses.forEach((expense) => {
+      const d = new Date(expense.date || expense.createdAt);
+      if (isValidDate(d)) years.add(d.getFullYear());
+    });
+    return Array.from(years).sort((a, b) => b - a);
+  }, [rangeExpenses, selectedContext.year]);
+
+  const availableComparisonCategories = useMemo(() => {
+    const set = new Set();
+    rangeExpenses.forEach((expense) => {
+      const category = String(expense.category || "Others").trim();
+      if (category) set.add(category);
+    });
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [rangeExpenses]);
 
   useEffect(() => {
     const handleResize = () => setIsCompactPie(window.innerWidth < 1200);
@@ -300,6 +321,104 @@ export default function Reports() {
   );
 
   const transactions = useMemo(() => monthExpenses.length, [monthExpenses]);
+
+  const comparedContext = useMemo(() => {
+    if (compareMonth && compareYear) {
+      return { month: Number(compareMonth) - 1, year: Number(compareYear) };
+    }
+
+    const d = new Date(selectedContext.year, selectedContext.month - 1, 1);
+    return { month: d.getMonth(), year: d.getFullYear() };
+  }, [compareMonth, compareYear, selectedContext.month, selectedContext.year]);
+
+  const comparedMonthExpenses = useMemo(() => {
+    return rangeExpenses.filter((expense) => {
+      const d = new Date(expense.date || expense.createdAt);
+      if (!isValidDate(d)) return false;
+      return d.getMonth() === comparedContext.month && d.getFullYear() === comparedContext.year;
+    });
+  }, [comparedContext.month, comparedContext.year, rangeExpenses]);
+
+  const comparedTotal = useMemo(
+    () => comparedMonthExpenses.reduce((sum, e) => sum + Number(e.amount || 0), 0),
+    [comparedMonthExpenses]
+  );
+
+  const comparedLabel = useMemo(
+    () => getMonthName(comparedContext.month, comparedContext.year),
+    [comparedContext.month, comparedContext.year]
+  );
+
+  const categoryComparisonRows = useMemo(() => {
+    return availableComparisonCategories
+      .map((category) => {
+        const currentTotal = monthExpenses
+          .filter((expense) => String(expense.category || "Others") === category)
+          .reduce((sum, expense) => sum + Number(expense.amount || 0), 0);
+
+        const comparedTotal = comparedMonthExpenses
+          .filter((expense) => String(expense.category || "Others") === category)
+          .reduce((sum, expense) => sum + Number(expense.amount || 0), 0);
+
+        return {
+          category,
+          currentTotal,
+          comparedTotal
+        };
+      })
+      .sort((a, b) => {
+        const byCurrent = b.currentTotal - a.currentTotal;
+        if (byCurrent !== 0) return byCurrent;
+        return b.comparedTotal - a.comparedTotal;
+      });
+  }, [availableComparisonCategories, comparedMonthExpenses, monthExpenses]);
+
+  const visibleCategoryComparisonRows = isCategoryCompareExpanded
+    ? categoryComparisonRows
+    : categoryComparisonRows.slice(0, 4);
+
+  const categoryPreviewRows = useMemo(() => {
+    if (!categoryComparisonRows.length) return [];
+
+    const topCurrent = categoryComparisonRows.reduce((best, row) => {
+      if (!best) return row;
+      const rowCurrent = Number(row.currentTotal || 0);
+      const bestCurrent = Number(best.currentTotal || 0);
+      if (rowCurrent !== bestCurrent) return rowCurrent > bestCurrent ? row : best;
+
+      const rowCompared = Number(row.comparedTotal || 0);
+      const bestCompared = Number(best.comparedTotal || 0);
+      return rowCompared > bestCompared ? row : best;
+    }, null);
+
+    const topCompared = categoryComparisonRows.reduce((best, row) => {
+      if (!best) return row;
+      const rowCompared = Number(row.comparedTotal || 0);
+      const bestCompared = Number(best.comparedTotal || 0);
+      if (rowCompared !== bestCompared) return rowCompared > bestCompared ? row : best;
+
+      const rowCurrent = Number(row.currentTotal || 0);
+      const bestCurrent = Number(best.currentTotal || 0);
+      return rowCurrent > bestCurrent ? row : best;
+    }, null);
+
+    const rows = [];
+    if (topCurrent) rows.push(topCurrent);
+    if (topCompared && (!topCurrent || topCompared.category !== topCurrent.category)) {
+      rows.push(topCompared);
+    }
+
+    if (rows.length < 2) {
+      for (const row of categoryComparisonRows) {
+        if (!rows.some((r) => r.category === row.category)) {
+          rows.push(row);
+        }
+        if (rows.length === 2) break;
+      }
+    }
+
+    return rows;
+  }, [categoryComparisonRows]);
 
   const lastMonthSummary = useMemo(() => {
     const selectedMonth = selectedContext.month;
@@ -550,9 +669,9 @@ export default function Reports() {
     });
   }, [selectedContext.month, selectedContext.year, yearExpenses]);
 
-  const diff = monthlyTotal - lastMonthSummary.total;
+  const diff = monthlyTotal - comparedTotal;
   const percentChange =
-    lastMonthSummary.total > 0 ? ((diff / lastMonthSummary.total) * 100).toFixed(1) : "0.0";
+    comparedTotal > 0 ? ((diff / comparedTotal) * 100).toFixed(1) : "0.0";
 
 
   const noExpenseDays = useMemo(() => {
@@ -691,14 +810,167 @@ export default function Reports() {
         </div>
 
         <div className="report-cards">
-          <div className="report-card">
+          <div 
+          className="report-card">
             <h3>This Month ({currentMonthLabel})</h3>
             <h2>{money(monthlyTotal)}</h2>
           </div>
 
           <div className="report-card">
-            <h3>Compared With ({lastMonthSummary.label})</h3>
-            <h2>{money(lastMonthSummary.total)}</h2>
+            <h3>Compared With ({comparedLabel})</h3>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <select
+                value={compareMonth}
+                onChange={(e) => setCompareMonth(e.target.value)}
+                style={{ minWidth: 88 }}
+              >
+                <option value="">This-Month</option>
+                {[...Array(12)].map((_, i) => (
+                  <option key={`cmp-month-${i + 1}`} value={i + 1}>
+                    {i + 1}
+                  </option>
+                ))}
+              </select>
+              <select
+                value={compareYear}
+                onChange={(e) => setCompareYear(e.target.value)}
+                style={{ minWidth: 92 }}
+              >
+                <option value="">2026</option>
+                {availableComparisonYears.map((year) => (
+                  <option key={`cmp-year-${year}`} value={year}>
+                    {year}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <h2>{money(comparedTotal)}</h2>
+          </div>
+
+
+          <div
+            className="report-card"
+            style={{
+              height: 80,                 
+              position: "relative",        
+              display: "flex",
+              flexDirection: "column",
+              overflow: "visible"          
+            }}
+          >
+            {/* HEADER */}
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <h3 style={{ margin: 0 }}>Category Compare</h3>
+
+              <button
+                type="button"
+                onClick={() => setIsCategoryCompareExpanded((p) => !p)}
+                style={{
+                  border: "1px solid rgba(148,163,184,0.35)",
+                  background: "rgba(15,23,42,0.85)",
+                  color: "#e2e8f0",
+                  borderRadius: 8,
+                  fontSize: 12,
+                  padding: "4px 4px",
+                  cursor: "pointer"
+                }}
+              >
+                {isCategoryCompareExpanded ? "Collapse" : "Expand"}
+              </button>
+            </div>
+
+            {/* SUBTEXT */}
+            <div style={{ color: "#94a3b8", fontSize: 8, marginTop: 1 }}>
+              {currentMonthLabel} vs {comparedLabel}
+            </div>
+
+            {/* COMPACT (collapsed) preview */}
+            <div style={{ marginTop: 2 }}>
+              <table style={{ width: "100%", fontSize: 7 }}>
+                <tbody>
+                  {categoryPreviewRows.map((row) => (
+                    <tr key={row.category}>
+                      <td>{row.category}</td>
+                      <td style={{ textAlign: "right" }}>{money(row.currentTotal)}</td>
+                      <td style={{ textAlign: "right" }}>{money(row.comparedTotal)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* 🔥 DROPDOWN PANEL */}
+            {isCategoryCompareExpanded && (
+              <div
+                style={{
+                  position: "absolute",
+                  top: "100%",            // open below card
+                  left: 0,
+                  width: "100%",
+                  marginTop: 8,
+                  background: "#020617",
+                  border: "1px solid rgba(148,163,184,0.2)",
+                  borderRadius: 12,
+                  padding: 12,
+                  zIndex: 50,
+                  boxShadow: "0 10px 30px rgba(0,0,0,0.6)"
+                }}
+              >
+                {/* FILTERS for BOTH columns */}
+                <div style={{ display: "flex", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
+                  {/* LEFT (Current) */}
+                  <select value={filterMonth} onChange={(e) => setFilterMonth(e.target.value)}>
+                    <option value="">Month</option>
+                    {[...Array(12)].map((_, i) => (
+                      <option key={i} value={i + 1}>{i + 1}</option>
+                    ))}
+                  </select>
+
+                  <select value={filterYear} onChange={(e) => setFilterYear(e.target.value)}>
+                    <option value="">This-Year</option>
+                    {availableComparisonYears.map((y) => (
+                      <option key={y} value={y}>{y}</option>
+                    ))}
+                  </select>
+
+                  {/* RIGHT (Compare) */}
+                  <select value={compareMonth} onChange={(e) => setCompareMonth(e.target.value)}>
+                    <option value="">Month</option>
+                    {[...Array(12)].map((_, i) => (
+                      <option key={i} value={i + 1}>{i + 1}</option>
+                    ))}
+                  </select>
+
+                  <select value={compareYear} onChange={(e) => setCompareYear(e.target.value)}>
+                    <option value="">Comp-Year</option>
+                    {availableComparisonYears.map((y) => (
+                      <option key={y} value={y}>{y}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* FULL TABLE (NO SCROLL) */}
+                <table style={{ width: "100%", fontSize: 13 }}>
+                  <thead>
+                    <tr>
+                      <th style={{ textAlign: "left" }}>Category</th>
+                      <th style={{ textAlign: "right" }}>{currentMonthLabel}</th>
+                      <th style={{ textAlign: "right" }}>{comparedLabel}</th>
+                    </tr>
+                  </thead>
+
+                  <tbody>
+                    {categoryComparisonRows.map((row) => (
+                      <tr key={row.category}>
+                        <td>{row.category}</td>
+                        <td style={{ textAlign: "right" }}>{money(row.currentTotal)}</td>
+                        <td style={{ textAlign: "right" }}>{money(row.comparedTotal)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
 
           <div className="report-card">
@@ -707,56 +979,21 @@ export default function Reports() {
           </div>
 
           <div className="report-card">
-            <h3>Top Category</h3>
-            <h2>{topCategory}</h2>
-          </div>
-
-          <div className="report-card">
             <h3>Comparison</h3>
             <h2 style={{ color: diff >= 0 ? "#22c55e" : "#ef4444" }}>
               {diff >= 0 ? "Up" : "Down"} {percentChange}% ({money(diff)})
             </h2>
           </div>
-        </div>
 
-        <div className="charts-container report-chart-grid">
-                    {(timeFilter === "all" || timeFilter === "weekly" || timeFilter === "monthly") && (
-            <div className="report-chart-card report-chart-card--third">
-              <div className="report-chart-header">
-                <h3>Alerts</h3>
-              </div>
+          <div className="report-card">
+            <h3>Top Category</h3>
+            <h2>{topCategory}</h2>
+          </div>
 
-              {rangeLoading ? (
-                <p className="chart-note">Loading...</p>
-              ) : (
-                <>
-                  <p className="chart-note">Quick monthly alert summary.</p>
-                  <div style={{ display: "grid", gap: "10px" }}>
-                    {alerts.map((alert, idx) => (
-                      <div
-                        key={`alert-${idx}`}
-                        className="chart-click-tooltip"
-                        style={{
-                          margin: 0,
-                          borderColor:
-                            alert.level === "warn"
-                              ? "rgba(248,113,113,0.55)"
-                              : alert.level === "ok"
-                                ? "rgba(74,222,128,0.55)"
-                                : "rgba(56,189,248,0.55)"
-                        }}
-                      >
-                        {alert.text}
-                      </div>
-                    ))}
-                  </div>
-                </>
-              )}
-            </div>
-          )}
+
 
           {(timeFilter === "all" || timeFilter === "monthly") && (
-            <div className="report-chart-card report-chart-card--wide report-chart-card--daily">
+            <div className="report-chart-card report-chart-card--daily">
               <div className="report-chart-header">
                 <h3>Daily Trend ({currentMonthLabel})</h3>
                 <div className="chart-mode-buttons">
@@ -778,14 +1015,14 @@ export default function Reports() {
               ) : (
                 <>
                   <p className="chart-note">All days in selected month are shown (30/31). Days with no expense stay at 0.</p>
-                  <ResponsiveContainer width="100%" height={380}>
+                  <ResponsiveContainer width="100%" height={210}>
                     <ComposedChart data={dailyStackedChartData} margin={{ top: 20, right: 20, left: 0, bottom: 22 }}>
                       <CartesianGrid stroke="rgba(255,255,255,0.08)" strokeDasharray="3 3" />
                       <XAxis
                         dataKey="day"
                         interval={0}
                         tickFormatter={(day) => String(day).padStart(2, "0")}
-                        tick={{ fill: "#fafcff", fontSize: 10 }}
+                        tick={{ fill: "#fafcff", fontSize: 6.5 }}
                         angle={-35}
                         textAnchor="end"
                         height={54}
@@ -837,7 +1074,7 @@ export default function Reports() {
               ) : (
                 <>
                   <p className="chart-note">12-month totals view. Switch between line, bar, or both.</p>
-                  <ResponsiveContainer width="100%" height={380}>
+                  <ResponsiveContainer width="100%" height={210}>
                     <ComposedChart data={monthlyStackedChartData} margin={{ top: 20, right: 20, left: 0, bottom: 10 }}>
                       <CartesianGrid stroke="rgba(255,255,255,0.08)" strokeDasharray="3 3" />
                       <XAxis
@@ -870,7 +1107,7 @@ export default function Reports() {
           )}
 
           {(timeFilter === "all" || timeFilter === "monthly") && (
-            <div className="report-chart-card report-chart-card--wide report-chart-card--daily">
+            <div className="report-chart-card report-chart-card--daily">
               <div className="report-chart-header">
                 <h3>Daily Expenses ({currentMonthLabel})</h3>
                 <div className="chart-mode-buttons">
@@ -894,14 +1131,14 @@ export default function Reports() {
               ) : (
                 <>
                   <p className="chart-note">Switch view: stacked categories, category-wise scatter points, or both together.</p>
-                  <ResponsiveContainer width="100%" height={380}>
+                  <ResponsiveContainer width="100%" height={210}>
                     <ComposedChart data={dailyStackedChartData} margin={{ top: 20, right: 20, left: 0, bottom: 28 }}>
                       <CartesianGrid stroke="rgba(255,255,255,0.08)" strokeDasharray="3 3" />
                       <XAxis
                         dataKey="day"
                         interval={0}
                         tickFormatter={(day) => String(day).padStart(2, "0")}
-                        tick={{ fill: "#fafcff", fontSize: 10 }}
+                        tick={{ fill: "#fafcff", fontSize: 6.5 }}
                         angle={-35}
                         textAnchor="end"
                         height={56}
@@ -970,7 +1207,7 @@ export default function Reports() {
               ) : (
                 <>
                   <p className="chart-note">Switch view: stacked categories, category-wise scatter points, or both together for all 12 months.</p>
-                  <ResponsiveContainer width="100%" height={380}>
+                  <ResponsiveContainer width="100%" height={180}>
                     <ComposedChart data={monthlyStackedChartData} margin={{ top: 20, right: 20, left: 0, bottom: 10 }}>
                       <CartesianGrid stroke="rgba(255,255,255,0.08)" strokeDasharray="3 3" />
                       <XAxis
@@ -1015,7 +1252,7 @@ export default function Reports() {
           )}
 
           {(timeFilter === "all" || timeFilter === "monthly") && (
-            <div className="report-chart-card report-chart-card--wide report-chart-card--daily">
+            <div className="report-chart-card report-chart-card--daily">
               <div className="report-chart-header">
                 <h3>Top Expense Stack (High To Low)</h3>
               </div>
@@ -1027,7 +1264,7 @@ export default function Reports() {
               ) : (
                 <>
                   <p className="chart-note">Highest categories are shown at the top and lowest at the bottom.</p>
-                  <ResponsiveContainer width="100%" height={380}>
+                  <ResponsiveContainer width="100%" height={210}>
                     <BarChart layout="vertical" data={topExpenseStackData} margin={{ top: 10, right: 20, left: 10, bottom: 10 }}>
                       <CartesianGrid stroke="rgba(255,255,255,0.08)" strokeDasharray="3 3" />
                       <XAxis type="number" tick={{ fill: "#fefeff", fontSize: 11 }} axisLine={false} tickLine={false} />
@@ -1077,7 +1314,7 @@ export default function Reports() {
           )}
           <div className="report-chart-card report-chart-card--third">
             <h3>Category Breakdown</h3>
-            <ResponsiveContainer width="100%" height={isCompactPie ? 360 : 420}>
+            <ResponsiveContainer width="100%" height={isCompactPie ? 210 : 220}>
               <PieChart>
                 <Pie
                   data={categoryChartData}
@@ -1111,7 +1348,7 @@ export default function Reports() {
           </div>
 
           {(!TEMP_DISABLE_TWELVE_MONTH_TREND && (timeFilter === "all" || timeFilter === "yearly")) && (
-            <div className="report-chart-card report-chart-card--full">
+            <div className="report-chart-card">
               <div className="report-chart-header">
                 <h3>12 Months Trend (Selected Year)</h3>
                 <div className="chart-mode-buttons">
@@ -1130,7 +1367,7 @@ export default function Reports() {
 
               <p className="chart-note">Jan to Dec of selected year are shown. Months with no expense stay at 0.</p>
 
-              <ResponsiveContainer width="100%" height={340}>
+              <ResponsiveContainer width="100%" height={210}>
                 <ComposedChart data={twelveMonthChartData} margin={{ top: 20, right: 20, left: 0, bottom: 30 }}>
                   <CartesianGrid stroke="rgba(255,255,255,0.08)" strokeDasharray="3 3" />
                   <XAxis dataKey="label" interval={0} angle={-17} height={56} textAnchor="end" tick={{ fill: "#fafcff", fontSize: 10 }} axisLine={false} tickLine={false} />
@@ -1154,6 +1391,15 @@ export default function Reports() {
     </div>
   );
 }
+
+
+
+
+
+
+
+
+
 
 
 

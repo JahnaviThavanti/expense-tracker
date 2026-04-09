@@ -1,17 +1,17 @@
 .report-cards {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 14px;
-  margin-top: 20px;
+  gap: 10px;
+  margin-top: 10px;
 }
 
 .report-card {
   background: #020617;
-  padding: 18px;
+  padding: 10px 12px;
   border-radius: 12px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 2px;
 }
 
 @media (max-width: 1100px) {
@@ -28,18 +28,20 @@
 
 .report-card h3 {
   margin: 0;
-  line-height: 1.25;
+  line-height: 1.2;
+  font-size: 1.00rem;
 }
 
 .report-card h2 {
   margin: 0;
-  line-height: 1.2;
+  line-height: 1.15;
+  font-size: 1rem;
 }
 
 .charts-container {
   display: flex;
-  gap: 30px;
-  margin-top: 40px;
+  gap: 12px;
+  margin-top: 16px;
   flex-wrap: wrap;
   width: 100%;
 }
@@ -63,7 +65,7 @@
   background: #020617;
   padding: 20px;
   border-radius: 14px;
-  margin-top: 20px;
+  margin-top: 14px;
 }
 
 .comparison-bar {
@@ -81,8 +83,8 @@
 
 .report-filters {
   display:flex;
-  gap:10px;
-  margin-bottom:20px;
+  gap:8px;
+  margin-bottom:10px;
 }
 
 .report-filters select,
@@ -262,8 +264,8 @@
 .report-filters {
   display: flex;
   flex-wrap: wrap;
-  gap: 12px;
-  margin-bottom: 20px;
+  gap: 8px;
+  margin-bottom: 10px;
 }
 
 .report-filters {
@@ -278,62 +280,86 @@
   .recharts-legend-wrapper {
     position: relative !important;
     width: 100% !important;
-    margin-top: 20px;
+    margin-top: 14px;
   }
 }
 
 .report-chart-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
-  gap: 20px;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
   width: 100%;
+  align-items: stretch;
 }
 
 .report-chart-card {
   background: #3d2c5c;
-  padding: 20px;
+  padding: 10px 12px;
   border-radius: 12px;
+  height: 300px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .report-chart-card h3 {
   margin: 0;
+  font-size: 18px;
+  line-height: 1.2;
 }
 
 .report-chart-card--wide {
-  grid-column: span 2;
+  grid-column: span 1;
 }
 
 .report-chart-card--third {
   width: 100%;
 }
 
-/* Mobile fix */
-@media (max-width: 768px) {
-  .report-chart-card--wide {
-    grid-column: span 1;
+.report-chart-card--full {
+  grid-column: span 1;
+}
+
+.report-chart-card .recharts-responsive-container {
+  height: 210px !important;
+}
+
+.report-chart-card--daily .recharts-responsive-container {
+  height: 210px !important;
+}
+
+@media (max-width: 1200px) {
+  .report-chart-grid {
+    grid-template-columns: repeat(2, 1fr);
   }
 }
 
-.report-chart-card--narrow {
-  flex: 1 1 420px;
-  min-height: 380px;
-}
+@media (max-width: 768px) {
+  .report-chart-grid {
+    grid-template-columns: 1fr;
+  }
 
-.report-chart-card--full {
-  flex: 1 1 100%;
+  .report-chart-card {
+    height: auto;
+    min-height: 280px;
+  }
+
+  .report-chart-card .recharts-responsive-container {
+    height: 220px !important;
+  }
 }
 
 .report-chart-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: 12px;
-  margin-bottom: 10px;
+  gap: 5px;
+  margin-bottom: 6px;
 }
 
 .chart-mode-buttons {
   display: flex;
-  gap: 8px;
+  gap: 5px;
   flex-wrap: wrap;
 }
 
@@ -362,14 +388,14 @@
 .category-filter-row {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 5px;
   margin: 6px 0 10px;
 }
 
 .category-filter-btn {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 5px;
   background: rgba(15, 23, 42, 0.65);
   color: #e2e8f0;
   border: 1px solid rgba(148, 163, 184, 0.35);
@@ -399,10 +425,10 @@
 }
 
 .chart-note {
-  margin-top: 4px;
-  margin-bottom: 12px;
+  margin-top: 2px;
+  margin-bottom: 8px;
   color: #cbd5e1;
-  font-size: 13px;
+  font-size: 12px;
 }
 
 .report-time-filters {
@@ -445,7 +471,36 @@
 
 @media (max-width: 900px) {
   .report-chart-header {
-    flex-direction: column;
-    align-items: flex-start;
-  }
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 5px;
+  margin-bottom: 6px;
 }
+}
+
+
+
+
+
+
+
+
+
+
+
+/* Reports top spacing tighten */
+.page-title {
+  margin: 0 0 10px;
+}
+
+.report-time-filters {
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.report-filters {
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
