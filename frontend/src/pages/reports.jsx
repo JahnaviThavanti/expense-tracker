@@ -130,6 +130,8 @@ export default function Reports() {
     typeof window !== "undefined" ? window.innerWidth < 1200 : false
   );
 
+  const [sortOrder, setSortOrder] = useState("desc"); // asc | desc
+
   const { hasExpenseOnDate } = useExpenseDateHighlights();
 
   const money = (value) =>
@@ -851,11 +853,11 @@ export default function Reports() {
           <div
             className="report-card"
             style={{
-              height: 80,                 
-              position: "relative",        
+              height: 80,
+              position: "relative",
               display: "flex",
               flexDirection: "column",
-              overflow: "visible"          
+              overflow: "visible"
             }}
           >
             {/* HEADER */}
@@ -863,15 +865,14 @@ export default function Reports() {
               <h3 style={{ margin: 0 }}>Category Compare</h3>
 
               <button
-                type="button"
-                onClick={() => setIsCategoryCompareExpanded((p) => !p)}
+                onClick={() => setIsCategoryCompareExpanded(p => !p)}
                 style={{
                   border: "1px solid rgba(148,163,184,0.35)",
                   background: "rgba(15,23,42,0.85)",
                   color: "#e2e8f0",
                   borderRadius: 8,
                   fontSize: 12,
-                  padding: "4px 4px",
+                  padding: "4px 6px",
                   cursor: "pointer"
                 }}
               >
@@ -880,31 +881,29 @@ export default function Reports() {
             </div>
 
             {/* SUBTEXT */}
-            <div style={{ color: "#94a3b8", fontSize: 8, marginTop: 1 }}>
+            <div style={{ color: "#94a3b8", fontSize: 8 }}>
               {currentMonthLabel} vs {comparedLabel}
             </div>
 
-            {/* COMPACT (collapsed) preview */}
-            <div style={{ marginTop: 2 }}>
-              <table style={{ width: "100%", fontSize: 7 }}>
-                <tbody>
-                  {categoryPreviewRows.map((row) => (
-                    <tr key={row.category}>
-                      <td>{row.category}</td>
-                      <td style={{ textAlign: "right" }}>{money(row.currentTotal)}</td>
-                      <td style={{ textAlign: "right" }}>{money(row.comparedTotal)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            {/* PREVIEW */}
+            <table style={{ width: "100%", fontSize: 7 }}>
+              <tbody>
+                {categoryPreviewRows.map((row) => (
+                  <tr key={row.category}>
+                    <td>{row.category}</td>
+                    <td style={{ textAlign: "right" }}>{money(row.currentTotal)}</td>
+                    <td style={{ textAlign: "right" }}>{money(row.comparedTotal)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
 
-            {/* 🔥 DROPDOWN PANEL */}
+            {/* EXPANDED */}
             {isCategoryCompareExpanded && (
               <div
                 style={{
                   position: "absolute",
-                  top: "100%",            // open below card
+                  top: "100%",
                   left: 0,
                   width: "100%",
                   marginTop: 8,
@@ -912,13 +911,11 @@ export default function Reports() {
                   border: "1px solid rgba(148,163,184,0.2)",
                   borderRadius: 12,
                   padding: 12,
-                  zIndex: 50,
-                  boxShadow: "0 10px 30px rgba(0,0,0,0.6)"
+                  zIndex: 50
                 }}
               >
-                {/* FILTERS for BOTH columns */}
+                {/* FILTERS */}
                 <div style={{ display: "flex", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
-                  {/* LEFT (Current) */}
                   <select value={filterMonth} onChange={(e) => setFilterMonth(e.target.value)}>
                     <option value="">Month</option>
                     {[...Array(12)].map((_, i) => (
@@ -929,11 +926,10 @@ export default function Reports() {
                   <select value={filterYear} onChange={(e) => setFilterYear(e.target.value)}>
                     <option value="">This-Year</option>
                     {availableComparisonYears.map((y) => (
-                      <option key={y} value={y}>{y}</option>
+                      <option key={y}>{y}</option>
                     ))}
                   </select>
 
-                  {/* RIGHT (Compare) */}
                   <select value={compareMonth} onChange={(e) => setCompareMonth(e.target.value)}>
                     <option value="">Month</option>
                     {[...Array(12)].map((_, i) => (
@@ -944,34 +940,94 @@ export default function Reports() {
                   <select value={compareYear} onChange={(e) => setCompareYear(e.target.value)}>
                     <option value="">Comp-Year</option>
                     {availableComparisonYears.map((y) => (
-                      <option key={y} value={y}>{y}</option>
+                      <option key={y}>{y}</option>
                     ))}
                   </select>
                 </div>
 
-                {/* FULL TABLE (NO SCROLL) */}
-                <table style={{ width: "100%", fontSize: 13 }}>
-                  <thead>
-                    <tr>
-                      <th style={{ textAlign: "left" }}>Category</th>
-                      <th style={{ textAlign: "right" }}>{currentMonthLabel}</th>
-                      <th style={{ textAlign: "right" }}>{comparedLabel}</th>
-                    </tr>
-                  </thead>
+                {/* 🔥 CORE LOGIC */}
+                {(() => {
+                  // ✅ enhance data
+                  const enhanced = categoryComparisonRows.map(r => {
+                    const diff = r.currentTotal - r.comparedTotal;
+                    const percent =
+                      r.comparedTotal !== 0 ? (diff / r.comparedTotal) * 100 : 0;
 
-                  <tbody>
-                    {categoryComparisonRows.map((row) => (
-                      <tr key={row.category}>
-                        <td>{row.category}</td>
-                        <td style={{ textAlign: "right" }}>{money(row.currentTotal)}</td>
-                        <td style={{ textAlign: "right" }}>{money(row.comparedTotal)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    return { ...r, diff, percent };
+                  });
+
+                  // ✅ sort by diff
+                  const sorted = [...enhanced].sort((a, b) =>
+                    sortOrder === "asc" ? a.diff - b.diff : b.diff - a.diff
+                  );
+
+                  return (
+                    <table style={{ width: "100%", fontSize: 13 }}>
+                      <thead>
+                        <tr>
+                          <th>Category</th>
+
+                          <th style={{ textAlign: "right" }}>
+                            {currentMonthLabel}
+                            <button
+                              onClick={() =>
+                                setSortOrder(p => (p === "asc" ? "desc" : "asc"))
+                              }
+                              style={{ marginLeft: 6 }}
+                            >
+                              ⇅
+                            </button>
+                          </th>
+
+                          <th style={{ textAlign: "right" }}>{comparedLabel}</th>
+
+                          {/* 🔥 NEW COLUMN */}
+                          <th style={{ textAlign: "right" }}>Comparison</th>
+                        </tr>
+                      </thead>
+
+                      <tbody>
+                        {sorted.map((row) => {
+                          const isInc = row.diff >= 0;
+
+                          return (
+                            <tr key={row.category}>
+                              <td>{row.category}</td>
+
+                              <td style={{ textAlign: "right" }}>
+                                {money(row.currentTotal)}
+                              </td>
+
+                              <td style={{ textAlign: "right" }}>
+                                {money(row.comparedTotal)}
+                              </td>
+
+                              {/* 🔥 NEW COLUMN DATA */}
+                              <td style={{ textAlign: "right" }}>
+                                <div
+                                  style={{
+                                    color: isInc ? "#22c55e" : "#ef4444",
+                                    fontWeight: "bold"
+                                  }}
+                                >
+                                  {isInc ? "▲" : "▼"} {money(Math.abs(row.diff))}
+                                </div>
+
+                                <div style={{ fontSize: 11, color: "#94a3b8" }}>
+                                  {Math.abs(row.percent).toFixed(1)}%
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  );
+                })()}
               </div>
             )}
           </div>
+
 
           <div className="report-card">
             <h3>Transactions</h3>
@@ -1015,8 +1071,8 @@ export default function Reports() {
               ) : (
                 <>
                   <p className="chart-note">All days in selected month are shown (30/31). Days with no expense stay at 0.</p>
-                  <ResponsiveContainer width="100%" height={210}>
-                    <ComposedChart data={dailyStackedChartData} margin={{ top: 20, right: 20, left: 0, bottom: 22 }}>
+                  <ResponsiveContainer width="100%" height={400}>
+                    <ComposedChart data={dailyStackedChartData} margin={{ top: 20, right: 10, left: 0, bottom: 190 }}>
                       <CartesianGrid stroke="rgba(255,255,255,0.08)" strokeDasharray="3 3" />
                       <XAxis
                         dataKey="day"
@@ -1025,7 +1081,7 @@ export default function Reports() {
                         tick={{ fill: "#fafcff", fontSize: 6.5 }}
                         angle={-35}
                         textAnchor="end"
-                        height={54}
+                        height={24}
                         axisLine={false}
                         tickLine={false}
                       />
@@ -1131,14 +1187,14 @@ export default function Reports() {
               ) : (
                 <>
                   <p className="chart-note">Switch view: stacked categories, category-wise scatter points, or both together.</p>
-                  <ResponsiveContainer width="100%" height={210}>
+                  <ResponsiveContainer width="100%" height={260}>
                     <ComposedChart data={dailyStackedChartData} margin={{ top: 20, right: 20, left: 0, bottom: 28 }}>
                       <CartesianGrid stroke="rgba(255,255,255,0.08)" strokeDasharray="3 3" />
                       <XAxis
                         dataKey="day"
                         interval={0}
                         tickFormatter={(day) => String(day).padStart(2, "0")}
-                        tick={{ fill: "#fafcff", fontSize: 6.5 }}
+                        tick={{ fill: "#fafcff", fontSize: 7 }}
                         angle={-35}
                         textAnchor="end"
                         height={56}
@@ -1155,7 +1211,7 @@ export default function Reports() {
                           })
                         }
                       />
-                      <Legend />
+                      
                       {(dailyExpenseMode === "stack" || dailyExpenseMode === "both") && dailyStackCategories.map((category) => (
                         <Bar
                           key={`daily-${category}`}
@@ -1224,7 +1280,7 @@ export default function Reports() {
                           renderExpenseTooltip(props, (monthLabel) => `${monthLabel} ${selectedContext.year}`)
                         }
                       />
-                      <Legend />
+                      
                       {(monthlyExpenseMode === "stack" || monthlyExpenseMode === "both") && monthlyStackCategories.map((category) => (
                         <Bar
                           key={`monthly-${category}`}
