@@ -5,7 +5,7 @@ import Sidebar from "../components/Sidebar";
 import "../styles/expense-tracker-settings.css";
 
 export default function Settings() {
-+
+
   const [darkMode, setDarkMode] = useState(true);
   const [notifications, setNotifications] = useState(true);
   const [password, setPassword] = useState("");
