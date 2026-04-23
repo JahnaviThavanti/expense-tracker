@@ -131,6 +131,7 @@ export default function Reports() {
   );
 
   const [sortOrder, setSortOrder] = useState("desc"); // asc | desc
+  const [sortKey, setSortKey] = useState("diff");
 
   const { hasExpenseOnDate } = useExpenseDateHighlights();
 
@@ -945,9 +946,8 @@ export default function Reports() {
                   </select>
                 </div>
 
-                {/* 🔥 CORE LOGIC */}
+                {/* CORE LOGIC */}
                 {(() => {
-                  // ✅ enhance data
                   const enhanced = categoryComparisonRows.map(r => {
                     const diff = r.currentTotal - r.comparedTotal;
                     const percent =
@@ -956,33 +956,75 @@ export default function Reports() {
                     return { ...r, diff, percent };
                   });
 
-                  // ✅ sort by diff
-                  const sorted = [...enhanced].sort((a, b) =>
-                    sortOrder === "asc" ? a.diff - b.diff : b.diff - a.diff
-                  );
+                  // ✅ UPDATED SORT (multi-column)
+                  const sorted = [...enhanced].sort((a, b) => {
+                    let valA = a[sortKey];
+                    let valB = b[sortKey];
+
+                    if (typeof valA === "string") {
+                      return sortOrder === "asc"
+                        ? valA.localeCompare(valB)
+                        : valB.localeCompare(valA);
+                    }
+
+                    return sortOrder === "asc" ? valA - valB : valB - valA;
+                  });
 
                   return (
                     <table style={{ width: "100%", fontSize: 13 }}>
                       <thead>
                         <tr>
-                          <th>Category</th>
+                          <th>
+                            Category
+                            <button
+                              onClick={() => {
+                                setSortKey("category");
+                                setSortOrder(p => (p === "asc" ? "desc" : "asc"));
+                              }}
+                              style={{ marginLeft: 6 }}
+                            >
+                              {sortKey === "category" ? (sortOrder === "asc" ? "↑" : "↓") : "⇅"}
+                            </button>
+                          </th>
 
                           <th style={{ textAlign: "right" }}>
                             {currentMonthLabel}
                             <button
-                              onClick={() =>
-                                setSortOrder(p => (p === "asc" ? "desc" : "asc"))
-                              }
+                              onClick={() => {
+                                setSortKey("currentTotal");
+                                setSortOrder(p => (p === "asc" ? "desc" : "asc"));
+                              }}
                               style={{ marginLeft: 6 }}
                             >
-                              ⇅
+                              {sortKey === "currentTotal" ? (sortOrder === "asc" ? "↑" : "↓") : "⇅"}
                             </button>
                           </th>
 
-                          <th style={{ textAlign: "right" }}>{comparedLabel}</th>
+                          <th style={{ textAlign: "right" }}>
+                            {comparedLabel}
+                            <button
+                              onClick={() => {
+                                setSortKey("comparedTotal");
+                                setSortOrder(p => (p === "asc" ? "desc" : "asc"));
+                              }}
+                              style={{ marginLeft: 6 }}
+                            >
+                              {sortKey === "comparedTotal" ? (sortOrder === "asc" ? "↑" : "↓") : "⇅"}
+                            </button>
+                          </th>
 
-                          {/* 🔥 NEW COLUMN */}
-                          <th style={{ textAlign: "right" }}>Comparison</th>
+                          <th style={{ textAlign: "right" }}>
+                            Comparison
+                            <button
+                              onClick={() => {
+                                setSortKey("diff");
+                                setSortOrder(p => (p === "asc" ? "desc" : "asc"));
+                              }}
+                              style={{ marginLeft: 6 }}
+                            >
+                              {sortKey === "diff" ? (sortOrder === "asc" ? "↑" : "↓") : "⇅"}
+                            </button>
+                          </th>
                         </tr>
                       </thead>
 
@@ -1002,7 +1044,6 @@ export default function Reports() {
                                 {money(row.comparedTotal)}
                               </td>
 
-                              {/* 🔥 NEW COLUMN DATA */}
                               <td style={{ textAlign: "right" }}>
                                 <div
                                   style={{
@@ -1027,7 +1068,6 @@ export default function Reports() {
               </div>
             )}
           </div>
-
 
           <div className="report-card">
             <h3>Transactions</h3>
@@ -1197,7 +1237,7 @@ export default function Reports() {
                         tick={{ fill: "#fafcff", fontSize: 7 }}
                         angle={-35}
                         textAnchor="end"
-                        height={56}
+                        height={80}
                         axisLine={false}
                         tickLine={false}
                       />
